@@ -1,0 +1,15 @@
+{
+  "projects": {
+    "default": "cmg-iso-system"
+  },
+  "targets": {
+    "cmg-iso-system": {
+      "hosting": {
+        "site-01": [
+          "cmg-iso-system"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

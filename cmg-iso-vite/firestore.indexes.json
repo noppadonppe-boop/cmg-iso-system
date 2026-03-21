@@ -1,0 +1,60 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "auditPlans",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "yearCycleId", "order": "ASCENDING" },
+        { "fieldPath": "scheduledDate", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "cpars",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "yearCycleId", "order": "ASCENDING" },
+        { "fieldPath": "issuedDate", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "managementReviews",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "yearCycleId", "order": "ASCENDING" },
+        { "fieldPath": "meetingDate", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "kpis",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "yearCycleId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "kpiReports",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "kpiId", "order": "ASCENDING" },
+        { "fieldPath": "reportMonth", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "kpiReports",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "yearId", "order": "ASCENDING" },
+        { "fieldPath": "reportMonth", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "mocs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "yearCycleId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

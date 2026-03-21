@@ -1,0 +1,30 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── appMeta & users: readable/writable by any authenticated user ──────────
+    // (needed for first-user registration check and profile creation)
+    match /cmg-iso-system/root/appMeta/{docId} {
+      allow read, write: if request.auth != null;
+    }
+
+    match /cmg-iso-system/root/users/{uid} {
+      allow read, write: if request.auth != null;
+    }
+
+    match /cmg-iso-system/root/activityLogs/{docId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // ── All other subcollections require authentication ────────────────────────
+    match /cmg-iso-system/root/{subcollection}/{docId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // ── Root sentinel document ────────────────────────────────────────────────
+    match /cmg-iso-system/{docId} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}
