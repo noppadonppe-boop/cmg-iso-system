@@ -113,12 +113,12 @@ export default function DocumentsPage() {
       <style>{`@media print { body * { visibility:hidden; } #doc-print-area, #doc-print-area * { visibility:visible; } #doc-print-area { position:absolute;inset:0;padding:24px; } .no-print { display:none !important; } }`}</style>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6 no-print">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-4 mb-6 no-print">
         {[["Total Documents", total, "text-slate-700", "bg-slate-50"], ["Active", active, "text-green-700", "bg-green-50"], ["Under Review", underReview, "text-amber-700", "bg-amber-50"], ["Overdue Review", overdueRev, "text-red-700", "bg-red-50"]].map(([lbl, val, clr, bg]) => (
           <Card key={lbl as string} className={cn("border border-slate-200", bg as string)}>
-            <CardContent className="p-4">
-              <p className="text-xs font-medium text-slate-500 mb-1">{lbl as string}</p>
-              <p className={cn("text-3xl font-bold", clr as string)}>{val as number}</p>
+            <CardContent className="p-2 md:p-4 text-center md:text-left overflow-hidden">
+              <p className="text-[10px] md:text-xs font-medium text-slate-500 mb-0.5 md:mb-1 truncate">{lbl as string}</p>
+              <p className={cn("text-xl md:text-3xl font-bold truncate", clr as string)}>{val as number}</p>
             </CardContent>
           </Card>
         ))}

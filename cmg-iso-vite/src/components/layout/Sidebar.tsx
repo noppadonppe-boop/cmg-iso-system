@@ -5,7 +5,7 @@ import {
   FileText, GitMerge, Settings, ShieldCheck, ChevronLeft, ChevronRight,
   Building2, BookOpen, UserCog,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
@@ -58,25 +58,36 @@ const navGroups = [
   },
 ];
 
-export function Sidebar() {
+export function Sidebar({ mobileOpen, setMobileOpen }: { mobileOpen?: boolean, setMobileOpen?: (val: boolean) => void }) {
   const location = useLocation();
   const { userProfile, pendingCount, hasRole } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const isMasterAdmin = hasRole("MasterAdmin");
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  const effectiveCollapsed = collapsed && !isMobile;
 
   return (
     <aside
       className={cn(
-        "relative flex flex-col bg-slate-900 text-slate-100 transition-all duration-300 ease-in-out shrink-0",
-        collapsed ? "w-16" : "w-64"
+        "flex flex-col bg-slate-900 text-slate-100 transition-all duration-300 ease-in-out shrink-0 z-50",
+        "fixed inset-y-0 left-0 md:relative",
+        mobileOpen ? "translate-x-0 w-64 shadow-2xl md:shadow-none" : "-translate-x-full md:translate-x-0",
+        effectiveCollapsed ? "md:w-16" : "md:w-64"
       )}
     >
       {/* Logo / Brand */}
-      <div className={cn("flex items-center gap-3 px-4 py-4 border-b border-slate-700/60", collapsed && "justify-center px-2")}>
+      <div className={cn("flex items-center gap-3 px-4 py-4 border-b border-slate-700/60", effectiveCollapsed && "justify-center px-2")}>
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-600 font-bold text-white text-sm">
           CMG
         </div>
-        {!collapsed && (
+        {!effectiveCollapsed && (
           <div className="leading-tight">
             <p className="text-sm font-semibold tracking-wide text-white">CMG ISO</p>
             <p className="text-[10px] text-slate-400 font-medium">ISO 9001 · ISO 45001</p>
@@ -85,7 +96,7 @@ export function Sidebar() {
       </div>
 
       {/* User Profile Card */}
-      {userProfile && !collapsed && (
+      {userProfile && !effectiveCollapsed && (
         <div className="mx-3 my-3 rounded-xl bg-slate-800/60 border border-slate-700/50 p-3">
           <div className="flex items-center gap-2.5">
             {userProfile.photoURL ? (
@@ -111,7 +122,7 @@ export function Sidebar() {
           </div>
         </div>
       )}
-      {userProfile && collapsed && (
+      {userProfile && effectiveCollapsed && (
         <div className="flex justify-center py-3 border-b border-slate-700/40">
           {userProfile.photoURL ? (
             <img src={userProfile.photoURL} alt="" className="h-8 w-8 rounded-full object-cover ring-2 ring-blue-500/40" />
@@ -128,7 +139,7 @@ export function Sidebar() {
         <nav className="px-2 space-y-4">
           {navGroups.map((group) => (
             <div key={group.label}>
-              {!collapsed && (
+              {!effectiveCollapsed && (
                 <p className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-widest text-slate-500">
                   {group.label}
                 </p>
@@ -145,19 +156,22 @@ export function Sidebar() {
                         <TooltipTrigger asChild>
                           <NavLink
                             to={item.href}
+                            onClick={() => {
+                              if (isMobile) setMobileOpen?.(false);
+                            }}
                             className={cn(
                               "flex items-center gap-3 rounded-md px-2.5 py-2 text-sm font-medium transition-colors",
                               isActive
                                 ? "bg-blue-600/20 text-blue-400 border border-blue-600/30"
                                 : "text-slate-400 hover:bg-slate-800 hover:text-slate-100",
-                              collapsed && "justify-center px-0"
+                              effectiveCollapsed && "justify-center px-0"
                             )}
                           >
                             <Icon className={cn("shrink-0 h-4 w-4", isActive ? "text-blue-400" : "text-slate-500")} />
-                            {!collapsed && <span>{item.label}</span>}
+                            {!effectiveCollapsed && <span>{item.label}</span>}
                           </NavLink>
                         </TooltipTrigger>
-                        {collapsed && (
+                        {effectiveCollapsed && (
                           <TooltipContent side="right" className="text-xs">{item.label}</TooltipContent>
                         )}
                       </Tooltip>
@@ -165,7 +179,7 @@ export function Sidebar() {
                   );
                 })}
               </ul>
-              {collapsed && <Separator className="bg-slate-700/40 my-2" />}
+              {effectiveCollapsed && <Separator className="bg-slate-700/40 my-2" />}
             </div>
           ))}
         </nav>
@@ -178,12 +192,15 @@ export function Sidebar() {
             <TooltipTrigger asChild>
               <NavLink
                 to="/user-management"
+                onClick={() => {
+                  if (isMobile) setMobileOpen?.(false);
+                }}
                 className={({ isActive }) => cn(
                   "flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-sm font-medium transition-colors",
                   isActive
                     ? "bg-blue-600/20 text-blue-400 border border-blue-600/30"
                     : "text-slate-400 hover:bg-slate-800 hover:text-slate-100",
-                  collapsed && "justify-center px-0"
+                  effectiveCollapsed && "justify-center px-0"
                 )}
               >
                 <div className="relative shrink-0">
@@ -194,7 +211,7 @@ export function Sidebar() {
                     </span>
                   )}
                 </div>
-                {!collapsed && (
+                {!effectiveCollapsed && (
                   <span className="flex-1 flex items-center justify-between">
                     จัดการผู้ใช้งาน
                     {pendingCount > 0 && (
@@ -206,7 +223,7 @@ export function Sidebar() {
                 )}
               </NavLink>
             </TooltipTrigger>
-            {collapsed && (
+            {effectiveCollapsed && (
               <TooltipContent side="right" className="text-xs">
                 จัดการผู้ใช้งาน{pendingCount > 0 ? ` (${pendingCount} รออนุมัติ)` : ""}
               </TooltipContent>
@@ -216,12 +233,12 @@ export function Sidebar() {
       )}
 
       {/* Collapse Toggle */}
-      <div className={cn("p-2", isMasterAdmin ? "" : "border-t border-slate-700/60")}>
+      <div className={cn("p-2 hidden md:block", isMasterAdmin ? "" : "border-t border-slate-700/60")}>
         <button
           onClick={() => setCollapsed(!collapsed)}
           className="flex w-full items-center justify-center rounded-md py-2 text-slate-500 hover:bg-slate-800 hover:text-slate-300 transition-colors"
         >
-          {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+          {effectiveCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
         </button>
       </div>
     </aside>

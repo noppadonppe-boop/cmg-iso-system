@@ -8,9 +8,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { CalendarDays, ChevronDown, Loader2, LogOut, UserCircle, Save, X } from "lucide-react";
+import { CalendarDays, ChevronDown, Loader2, LogOut, UserCircle, Save, X, Menu } from "lucide-react";
 
-export function Header({ title }: { title?: string }) {
+export function Header({ title, onMenuClick }: { title?: string, onMenuClick?: () => void }) {
   const { yearCycles, selectedYear, setSelectedYear, isLoading } = useYearCycle();
   const { firebaseUser, userProfile, refreshProfile } = useAuth();
   const navigate = useNavigate();
@@ -62,9 +62,15 @@ export function Header({ title }: { title?: string }) {
   }
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-slate-200 bg-white/95 backdrop-blur-sm px-6 gap-4">
-      <div className="flex items-center gap-3 min-w-0">
-        {title && <h1 className="text-lg font-semibold text-slate-800 truncate">{title}</h1>}
+    <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-slate-200 bg-white/95 backdrop-blur-sm px-4 md:px-6 gap-2 md:gap-4">
+      <div className="flex items-center gap-2 md:gap-3 min-w-0">
+        <button 
+          onClick={onMenuClick}
+          className="md:hidden p-2 -ml-2 text-slate-600 hover:bg-slate-100 rounded-lg flex-shrink-0"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+        {title && <h1 className="text-base md:text-lg font-semibold text-slate-800 truncate">{title}</h1>}
       </div>
 
       <div className="flex items-center gap-3 shrink-0">

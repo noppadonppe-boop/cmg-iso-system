@@ -183,15 +183,13 @@ function StatCard({ icon: Icon, label, value, sub, color, bg }: {
 }) {
   return (
     <Card className={cn("border border-slate-200", bg)}>
-      <CardContent className="p-4">
-        <div className="flex items-start justify-between">
-          <div>
-            <p className="text-xs font-medium text-slate-500 mb-1">{label}</p>
-            <p className={cn("text-2xl font-bold", color)}>{value}</p>
-            {sub && <p className="text-[11px] text-slate-400 mt-0.5">{sub}</p>}
-          </div>
-          <Icon className={cn("h-5 w-5 mt-0.5", color)} />
+      <CardContent className="p-3 md:p-4 flex items-start justify-between gap-1 md:gap-2 overflow-hidden">
+        <div className="min-w-0">
+          <p className="text-[10px] md:text-xs font-medium text-slate-500 mb-0.5 md:mb-1 truncate">{label}</p>
+          <p className={cn("text-lg md:text-2xl font-bold truncate", color)}>{value}</p>
+          {sub && <p className="text-[9px] md:text-[11px] text-slate-400 mt-0.5 truncate">{sub}</p>}
         </div>
+        <Icon className={cn("h-4 w-4 md:h-5 md:w-5 mt-0.5 shrink-0", color)} />
       </CardContent>
     </Card>
   );

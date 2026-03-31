@@ -107,12 +107,12 @@ export default function KpiReportsPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-4 mb-5 no-print">
+      <div className="grid grid-cols-3 gap-2 md:gap-4 mb-5 no-print">
         {[["On Time", onTime, "text-green-700 bg-green-50"], ["Late", late, "text-red-700 bg-red-50"], ["Rate", `${submitRate}%`, "text-blue-700 bg-blue-50"]].map(([l,v,c]) => (
           <Card key={l as string} className={cn("border border-slate-200", (c as string).split(" ").slice(1).join(" "))}>
-            <CardContent className="p-4">
-              <p className="text-xs text-slate-500 mb-1">{l as string}</p>
-              <p className={cn("text-2xl font-bold", (c as string).split(" ")[0])}>{v as string|number}</p>
+            <CardContent className="p-2 md:p-4 text-center md:text-left overflow-hidden">
+              <p className="text-[10px] md:text-xs text-slate-500 mb-0.5 md:mb-1 truncate">{l as string}</p>
+              <p className={cn("text-base md:text-2xl font-bold truncate", (c as string).split(" ")[0])}>{v as string|number}</p>
             </CardContent>
           </Card>
         ))}
