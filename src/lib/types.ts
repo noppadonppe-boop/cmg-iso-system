@@ -21,6 +21,7 @@ export type UserProfile = {
   roles: UserRole[];
   status: "pending" | "approved" | "rejected";
   assignedProjects: string[];
+  departmentId?: string;
   createdAt: string;
   photoURL?: string | null;
   isFirstUser: boolean;

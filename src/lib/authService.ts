@@ -191,7 +191,7 @@ export async function updateUserRoles(uid: string, roles: UserRole[]) {
 
 export async function updateUserByAdmin(
   uid: string,
-  data: Partial<Pick<UserProfile, "firstName" | "lastName" | "position" | "roles" | "status">>,
+  data: Partial<Pick<UserProfile, "firstName" | "lastName" | "position" | "roles" | "status" | "departmentId">>,
 ) {
   await updateDoc(userDoc(uid), data);
 }

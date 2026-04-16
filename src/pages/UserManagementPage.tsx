@@ -3,8 +3,9 @@ import { useAuth } from "@/context/AuthContext";
 import {
   listAllUsers, approveUser, rejectUser, updateUserByAdmin,
 } from "@/lib/authService";
+import { getDepartments } from "@/lib/db";
 import { ROLES } from "@/lib/types";
-import type { UserProfile, UserRole } from "@/lib/types";
+import type { UserProfile, UserRole, Department } from "@/lib/types";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,6 +24,55 @@ const STATUS_LABEL: Record<string, { label: string; cls: string }> = {
   pending:  { label: "รออนุมัติ",   cls: "bg-amber-100 text-amber-700 border-amber-200"  },
   rejected: { label: "ปฏิเสธ",      cls: "bg-red-100   text-red-700   border-red-200"    },
 };
+
+// ── Department single-select ─────────────────────────────────────────────────
+function DepartmentSelect({ value, departments, onChange }: {
+  value: string;
+  departments: Department[];
+  onChange: (v: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = departments.find(d => d.id === value);
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="flex w-full items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors"
+      >
+        <span className="truncate">
+          {selected ? `${selected.code} – ${selected.name}` : "เลือก Department..."}
+        </span>
+        {open ? <ChevronUp className="h-4 w-4 shrink-0 text-slate-400" /> : <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />}
+      </button>
+      {open && (
+        <div className="absolute z-[10010] mt-1 w-full rounded-lg border border-slate-200 bg-white shadow-lg max-h-52 overflow-y-auto">
+          <button
+            type="button"
+            onClick={() => { onChange(""); setOpen(false); }}
+            className="flex w-full items-center px-3 py-2 hover:bg-slate-50 text-sm text-slate-400 italic transition-colors"
+          >
+            ไม่ระบุ
+          </button>
+          {departments.map(d => (
+            <button
+              key={d.id}
+              type="button"
+              onClick={() => { onChange(d.id); setOpen(false); }}
+              className={cn(
+                "flex w-full items-center gap-2 px-3 py-2 hover:bg-slate-50 text-sm transition-colors",
+                value === d.id && "bg-blue-50 text-blue-700 font-medium",
+              )}
+            >
+              <span className="font-mono text-xs text-blue-500 w-10 shrink-0">{d.code}</span>
+              {d.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── Role multi-select ─────────────────────────────────────────────────────────
 function RoleMultiSelect({ value, onChange }: { value: UserRole[]; onChange: (v: UserRole[]) => void }) {
@@ -43,7 +93,7 @@ function RoleMultiSelect({ value, onChange }: { value: UserRole[]; onChange: (v:
         {open ? <ChevronUp className="h-4 w-4 shrink-0 text-slate-400" /> : <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />}
       </button>
       {open && (
-        <div className="absolute z-50 mt-1 w-full rounded-lg border border-slate-200 bg-white shadow-lg">
+        <div className="absolute z-[10010] mt-1 w-full rounded-lg border border-slate-200 bg-white shadow-lg">
           {ROLES.map(r => (
             <label key={r} className="flex cursor-pointer items-center gap-2.5 px-3 py-2 hover:bg-slate-50 text-sm transition-colors">
               <input
@@ -62,14 +112,15 @@ function RoleMultiSelect({ value, onChange }: { value: UserRole[]; onChange: (v:
 }
 
 // ── User card (full-size) ─────────────────────────────────────────────────────
-function UserCard({ user, onUpdated }: { user: UserProfile; onUpdated: () => void }) {
+function UserCard({ user, departments, onUpdated }: { user: UserProfile; departments: Department[]; onUpdated: () => void }) {
   const { userProfile: me } = useAuth();
   const [editing,  setEditing]  = useState(false);
   const [saving,   setSaving]   = useState(false);
-  const [roles,    setRoles]    = useState<UserRole[]>(user.roles ?? []);
-  const [position, setPosition] = useState(user.position ?? "");
-  const [firstName, setFirstName] = useState(user.firstName ?? "");
-  const [lastName,  setLastName]  = useState(user.lastName  ?? "");
+  const [roles,      setRoles]      = useState<UserRole[]>(user.roles ?? []);
+  const [deptId,     setDeptId]     = useState(user.departmentId ?? "");
+  const [position,   setPosition]   = useState(user.position ?? "");
+  const [firstName,  setFirstName]  = useState(user.firstName ?? "");
+  const [lastName,   setLastName]   = useState(user.lastName  ?? "");
 
   const isSelf = me?.uid === user.uid;
 
@@ -88,7 +139,7 @@ function UserCard({ user, onUpdated }: { user: UserProfile; onUpdated: () => voi
   async function handleSave() {
     setSaving(true);
     try {
-      await updateUserByAdmin(user.uid, { roles, position, firstName, lastName });
+      await updateUserByAdmin(user.uid, { roles, position, firstName, lastName, departmentId: deptId || undefined });
       setEditing(false);
       onUpdated();
     } finally { setSaving(false); }
@@ -97,6 +148,7 @@ function UserCard({ user, onUpdated }: { user: UserProfile; onUpdated: () => voi
   function handleCancel() {
     setEditing(false);
     setRoles(user.roles ?? []);
+    setDeptId(user.departmentId ?? "");
     setPosition(user.position ?? "");
     setFirstName(user.firstName ?? "");
     setLastName(user.lastName ?? "");
@@ -171,6 +223,10 @@ function UserCard({ user, onUpdated }: { user: UserProfile; onUpdated: () => voi
               <div>
                 <label className="text-xs font-medium text-slate-600 mb-1 block">สิทธิ์การใช้งาน (Roles)</label>
                 <RoleMultiSelect value={roles} onChange={setRoles} />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-600 mb-1 block">แผนก (Department)</label>
+                <DepartmentSelect value={deptId} departments={departments} onChange={setDeptId} />
               </div>
             </div>
           )}
@@ -266,15 +322,17 @@ function StatCard({ icon: Icon, label, value, cls }: {
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function UserManagementPage() {
   const { refreshPending } = useAuth();
-  const [users,   setUsers]   = useState<UserProfile[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [filter,  setFilter]  = useState<FilterType>("all");
-  const [search,  setSearch]  = useState("");
+  const [users,       setUsers]       = useState<UserProfile[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [loading,     setLoading]     = useState(true);
+  const [filter,      setFilter]      = useState<FilterType>("all");
+  const [search,      setSearch]      = useState("");
 
   async function load() {
     setLoading(true);
     try {
-      const all = await listAllUsers();
+      const [all, depts] = await Promise.all([listAllUsers(), getDepartments()]);
+      setDepartments(depts);
       all.sort((a, b) => {
         const order: Record<string, number> = { pending: 0, approved: 1, rejected: 2 };
         return (order[a.status] ?? 1) - (order[b.status] ?? 1);
@@ -390,7 +448,7 @@ export default function UserManagementPage() {
               </p>
             )}
             {filtered.map(u => (
-              <UserCard key={u.uid} user={u} onUpdated={load} />
+              <UserCard key={u.uid} user={u} departments={departments} onUpdated={load} />
             ))}
           </div>
         )}

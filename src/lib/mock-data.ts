@@ -4,14 +4,18 @@ import type {
 } from "./types";
 
 export const DEPARTMENTS: Department[] = [
-  { id: "dept-mkt", code: "MKT", name: "Marketing" },
-  { id: "dept-log", code: "LOG", name: "Logistics" },
+  { id: "dept-mkt", code: "MKT", name: "Bidding" },
+  { id: "dept-log", code: "LOG", name: "Logistic and store" },
   { id: "dept-dcc", code: "DCC", name: "Document Control" },
   { id: "dept-hr",  code: "HR",  name: "Human Resources" },
   { id: "dept-she", code: "SHE", name: "Safety Health & Environment" },
   { id: "dept-qc",  code: "QC",  name: "Quality Control" },
-  { id: "dept-mfg", code: "MFG", name: "Manufacturing" },
+  { id: "dept-mfg", code: "MFG", name: "CMG Work Shop & Maintenance" },
   { id: "dept-it",  code: "IT",  name: "Information Technology" },
+  { id: "dept-pct", code: "PCT", name: "Procurement" },
+  { id: "dept-ppe", code: "PPE", name: "PPE" },
+  { id: "dept-con", code: "CON", name: "Construction" },
+  { id: "dept-pp",  code: "PP",  name: "Project Planning" },
 ];
 
 export const YEAR_CYCLES: YearCycle[] = [
