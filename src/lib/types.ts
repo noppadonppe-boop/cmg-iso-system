@@ -76,21 +76,35 @@ export type AuditorProfile = {
   iso45001ExamPassed: boolean;
   iso9001CertUrl: string | null;
   iso45001CertUrl: string | null;
+  iso9001Certs?: AuditAttachment[];
+  iso45001Certs?: AuditAttachment[];
   department?: Department;
+};
+
+export type AuditAttachment = {
+  name: string;
+  url: string;
+  size: number;
+  uploadedAt: string;
 };
 
 export type AuditPlan = {
   id: string;
   yearCycleId: string;
   auditType: string;
+  isoStandard?: "ISO9001" | "ISO45001" | "BOTH";
   roundNumber: number;
   scheduledDate: string;
+  endDate?: string;
   status: string;
   departmentId: string;
   auditorId: string;
   auditeeId: string;
   auditee: { id: string; name: string; department: Department };
   auditor?: { id: string; name: string };
+  scope?: string;
+  remarks?: string;
+  attachments?: AuditAttachment[];
   cpars: { id: string }[];
 };
 
@@ -111,6 +125,7 @@ export type CPAR = {
   closedDate: string | null;
   departmentId: string;
   department?: Department;
+  attachments?: AuditAttachment[];
 };
 
 export type ManagementReview = {
@@ -122,16 +137,19 @@ export type ManagementReview = {
   agendaUrl: string | null;
   minutesUrl: string | null;
   notes: string | null;
+  attachments?: AuditAttachment[];
 };
 
 export type KPI = {
   id: string;
   name: string;
+  description?: string;
   target: number;
   unit: string;
   departmentId: string;
   department?: Department;
   yearCycleId: string;
+  attachments?: AuditAttachment[];
   reports?: KPIReport[];
 };
 
@@ -146,6 +164,7 @@ export type KPIReport = {
   value: number;
   status: string;
   submittedAt: string;
+  attachments?: AuditAttachment[];
 };
 
 export type MOC = {
@@ -155,10 +174,11 @@ export type MOC = {
   description: string;
   status: string;
   requestorId: string;
-  requestor?: User;
+  requestor?: { id: string; name: string };
   yearCycleId: string;
   createdAt: string;
   updatedAt: string;
+  attachments?: AuditAttachment[];
 };
 
 export type Document = {
@@ -178,4 +198,5 @@ export type Document = {
   description: string;
   relatedCparId: string | null;
   relatedMocId: string | null;
+  attachments?: AuditAttachment[];
 };

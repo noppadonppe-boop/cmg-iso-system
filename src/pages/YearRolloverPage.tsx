@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -7,9 +7,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useYearCycle } from "@/context/YearCycleContext";
+import { useAuth } from "@/context/AuthContext";
 import { createYearCycle, updateYearCycle } from "@/lib/db";
+import { storage } from "@/lib/firebase";
+import { ref as storageRef, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import type { YearCycle } from "@/lib/types";
-import { Settings, Calendar, CheckCircle, Lock, Loader2, ExternalLink, PlusCircle, ArrowRight } from "lucide-react";
+import { Settings, Calendar, CheckCircle, Lock, Loader2, ExternalLink, PlusCircle, ArrowRight, Upload, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 
@@ -17,9 +20,36 @@ type ConfirmAction = "close" | "submit" | "rollover";
 
 export default function YearRolloverPage() {
   const { yearCycles, refresh } = useYearCycle();
-  const [confirm,   setConfirm]   = useState<{ action: ConfirmAction; yc: YearCycle } | null>(null);
-  const [reportUrl, setReportUrl] = useState("");
-  const [saving,    setSaving]    = useState(false);
+  const { userProfile } = useAuth();
+  const [confirm,     setConfirm]     = useState<{ action: ConfirmAction; yc: YearCycle } | null>(null);
+  const [reportUrl,   setReportUrl]   = useState("");
+  const [saving,      setSaving]      = useState(false);
+  const [uploading,   setUploading]   = useState(false);
+  const [uploadPct,   setUploadPct]   = useState(0);
+  const [uploadedFileName, setUploadedFileName] = useState("");
+  const reportFileInputRef = useRef<HTMLInputElement>(null);
+
+  async function handleReportFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    if (!e.target.files?.[0] || !confirm) return;
+    const file = e.target.files[0];
+    setUploading(true); setUploadPct(0);
+    try {
+      const path = `yearCycles/${confirm.yc.id}/${Date.now()}_${file.name}`;
+      const sRef = storageRef(storage, path);
+      const task = uploadBytesResumable(sRef, file);
+      await new Promise<void>((resolve, reject) => {
+        task.on("state_changed",
+          snap => setUploadPct(Math.round((snap.bytesTransferred / snap.totalBytes) * 100)),
+          reject, resolve);
+      });
+      const url = await getDownloadURL(task.snapshot.ref);
+      setReportUrl(url);
+      setUploadedFileName(file.name);
+    } finally {
+      setUploading(false); setUploadPct(0);
+      if (reportFileInputRef.current) reportFileInputRef.current.value = "";
+    }
+  }
 
   // The highest year currently in the system
   const maxYear = yearCycles.length > 0 ? Math.max(...yearCycles.map(y => y.year)) : new Date().getFullYear();
@@ -42,10 +72,13 @@ export default function YearRolloverPage() {
     if (!reportUrl) return;
     setSaving(true);
     try {
+      const submittedBy = userProfile
+        ? `${userProfile.firstName} ${userProfile.lastName}`.trim()
+        : "Admin";
       await updateYearCycle(yc.id, {
         annualReportUrl:   reportUrl,
         reportSubmittedAt: new Date().toISOString(),
-        reportSubmittedBy: "Admin",
+        reportSubmittedBy: submittedBy,
       });
       refresh();
       setConfirm(null);
@@ -155,7 +188,7 @@ export default function YearRolloverPage() {
                 </div>
                 {!yc.isClosed && (
                   <Button size="sm" variant="outline" className="h-8 text-xs"
-                    onClick={() => { setReportUrl(yc.annualReportUrl ?? ""); setConfirm({ action: "submit", yc }); }}>
+                    onClick={() => { setReportUrl(yc.annualReportUrl ?? ""); setUploadedFileName(""); setConfirm({ action: "submit", yc }); }}>
                     {yc.annualReportUrl ? "Update Report" : "Submit Report"}
                   </Button>
                 )}
@@ -241,20 +274,43 @@ export default function YearRolloverPage() {
       </Dialog>
 
       {/* ── Submit Report Dialog ── */}
-      <Dialog open={confirm?.action === "submit"} onOpenChange={v => !v && setConfirm(null)}>
-        <DialogContent className="max-w-sm">
+      <Dialog open={confirm?.action === "submit"} onOpenChange={v => { if (!v) { setConfirm(null); setReportUrl(""); setUploadedFileName(""); } }}>
+        <DialogContent className="sm:max-w-[460px]">
           <DialogHeader>
-            <DialogTitle>Submit Annual Report — {confirm?.yc.year}</DialogTitle>
+            <DialogTitle>Submit Annual Report — Year {confirm?.yc.year}</DialogTitle>
           </DialogHeader>
-          <div className="py-2">
-            <Label className="text-xs">Report URL *</Label>
-            <Input value={reportUrl} onChange={e => setReportUrl(e.target.value)}
-              placeholder="https://drive.google.com/..." className="mt-1 h-9 text-sm" />
+          <div className="py-2 space-y-3">
+            {/* Uploaded file display */}
+            {reportUrl && (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-green-200 bg-green-50">
+                <FileText className="h-4 w-4 text-green-600 shrink-0" />
+                <a href={reportUrl} target="_blank" rel="noopener noreferrer"
+                  className="flex-1 min-w-0 text-xs text-green-700 hover:underline truncate">
+                  {uploadedFileName || reportUrl}
+                </a>
+                <ExternalLink className="h-3 w-3 text-green-500 shrink-0" />
+              </div>
+            )}
+            {/* Upload button */}
+            <input ref={reportFileInputRef} type="file" className="hidden" onChange={handleReportFileUpload} />
+            <Button type="button" variant="outline" size="sm"
+              onClick={() => reportFileInputRef.current?.click()} disabled={uploading || saving}
+              className="w-full h-9 text-xs gap-2 border-dashed border-slate-300 hover:border-blue-400 hover:text-blue-600">
+              {uploading
+                ? (<><Loader2 className="h-3.5 w-3.5 animate-spin" />Uploading... {uploadPct}%</>)
+                : (<><Upload className="h-3.5 w-3.5" />{reportUrl ? "Replace File" : "Upload Report File (PDF / DOCX / XLSX)"}</>)}
+            </Button>
+            {/* Fallback: paste URL */}
+            <div>
+              <Label className="text-xs text-slate-400">หรือวาง URL โดยตรง</Label>
+              <Input value={reportUrl} onChange={e => { setReportUrl(e.target.value); setUploadedFileName(""); }}
+                placeholder="https://drive.google.com/..." className="mt-1 h-9 text-sm" />
+            </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirm(null)}>Cancel</Button>
-            <Button disabled={saving || !reportUrl} onClick={() => confirm && handleSubmitReport(confirm.yc)}>
-              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}Submit
+            <Button variant="outline" onClick={() => { setConfirm(null); setReportUrl(""); setUploadedFileName(""); }}>Cancel</Button>
+            <Button disabled={saving || uploading || !reportUrl} onClick={() => confirm && handleSubmitReport(confirm.yc)}>
+              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}Submit Report
             </Button>
           </DialogFooter>
         </DialogContent>

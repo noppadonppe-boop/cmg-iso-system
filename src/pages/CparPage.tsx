@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,9 +8,12 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useYearCycle } from "@/context/YearCycleContext";
-import { getCpars, updateCpar, getDepartments } from "@/lib/db";
-import type { CPAR, Department } from "@/lib/types";
-import { AlertTriangle, Loader2, RefreshCw, ChevronRight, Printer } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { getCpars, createCpar, deleteCpar, updateCpar, getAudits, updateAudit, getDepartments, generateCparId } from "@/lib/db";
+import { storage } from "@/lib/firebase";
+import { ref as storageRef, uploadBytesResumable, getDownloadURL } from "firebase/storage";
+import type { CPAR, AuditPlan, Department, AuditAttachment } from "@/lib/types";
+import { AlertTriangle, Loader2, RefreshCw, ChevronRight, Printer, Plus, Trash2, Upload, FileText, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 
@@ -27,21 +30,31 @@ const STEP_NEXT: Record<string, string> = {
 
 export default function CparPage() {
   const { selectedYear } = useYearCycle();
-  const [cpars,   setCpars]   = useState<CPAR[]>([]);
-  const [depts,   setDepts]   = useState<Department[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [cpars,      setCpars]      = useState<CPAR[]>([]);
+  const [depts,      setDepts]      = useState<Department[]>([]);
+  const [audits,     setAudits]     = useState<AuditPlan[]>([]);
+  const [loading,    setLoading]    = useState(true);
   const [filterStatus, setFilterStatus] = useState("ALL");
-  const [selected, setSelected] = useState<CPAR | null>(null);
-  const [advancing, setAdvancing] = useState(false);
-  const [editField, setEditField] = useState<"rootCause" | "correctiveAction" | "verificationResult" | null>(null);
-  const [editValue, setEditValue] = useState("");
+  const [selected,   setSelected]   = useState<CPAR | null>(null);
+  const [advancing,  setAdvancing]  = useState(false);
+  const [editField,  setEditField]  = useState<"rootCause" | "correctiveAction" | "verificationResult" | null>(null);
+  const [editValue,  setEditValue]  = useState("");
+  const [addOpen,    setAddOpen]    = useState(false);
+  const [addForm,    setAddForm]    = useState({ title: "", description: "", auditId: "", dueDate: "" });
+  const [addSaving,  setAddSaving]  = useState(false);
+  const [deletingId,        setDeletingId]        = useState<string | null>(null);
+  const pendingCparIdRef  = useRef<string>("");
+  const cparFileInputRef  = useRef<HTMLInputElement>(null);
+  const [pendingAttachments, setPendingAttachments] = useState<AuditAttachment[]>([]);
+  const [cparUploading,      setCparUploading]      = useState(false);
+  const [cparUploadPct,      setCparUploadPct]      = useState(0);
 
   const fetchData = useCallback(async () => {
     if (!selectedYear) return;
     setLoading(true);
     try {
-      const [c, d] = await Promise.all([getCpars(selectedYear.id), getDepartments()]);
-      setCpars(c); setDepts(d);
+      const [c, d, a] = await Promise.all([getCpars(selectedYear.id), getDepartments(), getAudits(selectedYear.id)]);
+      setCpars(c); setDepts(d); setAudits(a);
     } finally { setLoading(false); }
   }, [selectedYear]);
 
@@ -70,6 +83,84 @@ export default function CparPage() {
     setEditField(null);
   }
 
+  function formatBytes(bytes: number) {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  async function handleCparFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    if (!e.target.files?.[0]) return;
+    const file = e.target.files[0];
+    setCparUploading(true); setCparUploadPct(0);
+    try {
+      const path = `cpars/${pendingCparIdRef.current}/${Date.now()}_${file.name}`;
+      const sRef = storageRef(storage, path);
+      const task = uploadBytesResumable(sRef, file);
+      await new Promise<void>((resolve, reject) => {
+        task.on("state_changed",
+          snap => setCparUploadPct(Math.round((snap.bytesTransferred / snap.totalBytes) * 100)),
+          reject, resolve);
+      });
+      const url = await getDownloadURL(task.snapshot.ref);
+      setPendingAttachments(prev => [...prev, { name: file.name, url, size: file.size, uploadedAt: new Date().toISOString() }]);
+    } finally {
+      setCparUploading(false); setCparUploadPct(0);
+      if (cparFileInputRef.current) cparFileInputRef.current.value = "";
+    }
+  }
+
+  function nextCparNo() {
+    const year = selectedYear?.year ?? new Date().getFullYear();
+    const prefix = `CPAR-${year}-`;
+    const nums = cpars.filter(c => c.cparNo.startsWith(prefix)).map(c => parseInt(c.cparNo.slice(prefix.length)) || 0);
+    return `${prefix}${String(Math.max(0, ...nums) + 1).padStart(3, "0")}`;
+  }
+
+  async function handleAddCpar() {
+    if (!selectedYear || !addForm.title || !addForm.auditId || !addForm.dueDate) return;
+    const audit = audits.find(a => a.id === addForm.auditId);
+    if (!audit) return;
+    const dept = depts.find(d => d.id === audit.departmentId) ?? { id: "", code: "", name: "" };
+    setAddSaving(true);
+    try {
+      const newId = await createCpar({
+        cparNo:             nextCparNo(),
+        auditId:            addForm.auditId,
+        yearCycleId:        selectedYear.id,
+        title:              addForm.title,
+        description:        addForm.description,
+        status:             "ISSUED",
+        rootCause:          null,
+        correctiveAction:   null,
+        verificationResult: null,
+        issuedDate:         new Date().toISOString(),
+        dueDate:            addForm.dueDate,
+        closedDate:         null,
+        departmentId:       audit.departmentId,
+        department:         dept,
+        attachments:        pendingAttachments.length > 0 ? pendingAttachments : undefined,
+      }, pendingCparIdRef.current);
+      await updateAudit(addForm.auditId, { cpars: [...(audit.cpars ?? []), { id: newId }] });
+      setAddOpen(false);
+      setAddForm({ title: "", description: "", auditId: "", dueDate: "" });
+      setPendingAttachments([]);
+      fetchData();
+    } finally { setAddSaving(false); }
+  }
+
+  async function handleDeleteCpar(cpar: CPAR) {
+    if (!window.confirm(`ลบ CPAR "${cpar.cparNo} — ${cpar.title}"?\nการลบนี้ไม่สามารถย้อนกลับได้`)) return;
+    setDeletingId(cpar.id);
+    try {
+      await deleteCpar(cpar.id);
+      const audit = audits.find(a => a.id === cpar.auditId);
+      if (audit) await updateAudit(cpar.auditId, { cpars: (audit.cpars ?? []).filter(c => c.id !== cpar.id) });
+      if (selected?.id === cpar.id) setSelected(null);
+      fetchData();
+    } finally { setDeletingId(null); }
+  }
+
   const stats = STEPS.map(s => ({ ...s, count: cpars.filter(c => c.status === s.key).length }));
 
   return (
@@ -84,6 +175,9 @@ export default function CparPage() {
         ))}
         <Button variant="outline" size="sm" className="ml-auto h-8" onClick={fetchData}><RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} /></Button>
         <Button variant="outline" size="sm" className="h-8" onClick={() => window.print()}><Printer className="h-4 w-4 mr-1" />Print</Button>
+        <Button size="sm" className="h-8 bg-blue-600 hover:bg-blue-700 text-white gap-1.5" onClick={() => { pendingCparIdRef.current = generateCparId(); setAddForm({ title: "", description: "", auditId: "", dueDate: "" }); setPendingAttachments([]); setAddOpen(true); }}>
+          <Plus className="h-4 w-4" />Add CPAR
+        </Button>
       </div>
 
       <div className="flex gap-5">
@@ -112,6 +206,13 @@ export default function CparPage() {
                     </div>
                     <Badge variant="secondary" className="text-[10px] shrink-0">{dept?.code}</Badge>
                     <Badge className={cn("text-[10px] shrink-0 border", step.color)}>{step.label}</Badge>
+                    <button
+                      onClick={e => { e.stopPropagation(); handleDeleteCpar(cpar); }}
+                      disabled={!!deletingId}
+                      className="shrink-0 text-slate-200 hover:text-red-500 transition-colors p-1 rounded"
+                    >
+                      {deletingId === cpar.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                    </button>
                     <ChevronRight className="h-4 w-4 text-slate-300 shrink-0" />
                   </div>
                 );
@@ -189,6 +290,82 @@ export default function CparPage() {
           </div>
         )}
       </div>
+
+      {/* ── Add CPAR Dialog ── */}
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader><DialogTitle>Add CPAR</DialogTitle></DialogHeader>
+          <div className="grid gap-4 py-2 overflow-y-auto max-h-[70vh] pr-1">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Audit Plan <span className="text-red-500">*</span></Label>
+              <Select value={addForm.auditId} onValueChange={v => setAddForm(f => ({ ...f, auditId: v }))}>
+                <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="เลือก Audit Plan..." /></SelectTrigger>
+                <SelectContent>
+                  {audits.map(a => (
+                    <SelectItem key={a.id} value={a.id}>
+                      {a.auditee?.name}
+                      {a.auditee?.department?.code ? ` (${a.auditee.department.code})` : ""}
+                      {" — "}{a.scheduledDate ? format(new Date(a.scheduledDate), "d MMM yyyy") : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Title / หัวข้อ Non-Conformance <span className="text-red-500">*</span></Label>
+              <Input className="h-9 text-sm" value={addForm.title} onChange={e => setAddForm(f => ({ ...f, title: e.target.value }))} placeholder="ระบุหัวข้อข้อบกพร่อง..." />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Description / รายละเอียด</Label>
+              <Textarea className="text-sm min-h-[80px] resize-none" value={addForm.description} onChange={e => setAddForm(f => ({ ...f, description: e.target.value }))} placeholder="อธิบายรายละเอียดของ non-conformance..." />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Due Date <span className="text-red-500">*</span></Label>
+              <Input type="date" className="h-9 text-sm" value={addForm.dueDate} onChange={e => setAddForm(f => ({ ...f, dueDate: e.target.value }))} />
+            </div>
+
+            {/* Attachments */}
+            <div className="space-y-2">
+              <Label className="text-xs">Attachments / เอกสารแนบ</Label>
+              {pendingAttachments.length > 0 && (
+                <div className="space-y-1.5">
+                  {pendingAttachments.map((att, idx) => (
+                    <div key={idx} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 group">
+                      <FileText className="h-4 w-4 text-blue-500 shrink-0" />
+                      <a href={att.url} target="_blank" rel="noopener noreferrer"
+                        className="flex-1 min-w-0 text-xs text-blue-600 hover:underline truncate flex items-center gap-1">
+                        {att.name}<ExternalLink className="h-2.5 w-2.5 shrink-0" />
+                      </a>
+                      <span className="text-[10px] text-slate-400 shrink-0">{formatBytes(att.size)}</span>
+                      <button type="button"
+                        onClick={() => setPendingAttachments(prev => prev.filter((_, i) => i !== idx))}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity text-red-400 hover:text-red-600 shrink-0">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <input ref={cparFileInputRef} type="file" className="hidden" onChange={handleCparFileUpload} />
+              <Button type="button" variant="outline" size="sm"
+                onClick={() => cparFileInputRef.current?.click()}
+                disabled={cparUploading}
+                className="w-full h-9 text-xs gap-2 border-dashed border-slate-300 hover:border-blue-400 hover:text-blue-600">
+                {cparUploading
+                  ? (<><Loader2 className="h-3.5 w-3.5 animate-spin" />Uploading... {cparUploadPct}%</>)
+                  : (<><Upload className="h-3.5 w-3.5" />Upload File (max 20 MB)</>)}
+              </Button>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddOpen(false)} disabled={addSaving}>Cancel</Button>
+            <Button onClick={handleAddCpar} disabled={addSaving || !addForm.title || !addForm.auditId || !addForm.dueDate} className="bg-blue-600 hover:bg-blue-700 text-white">
+              {addSaving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+              Create CPAR
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Edit field dialog */}
       <Dialog open={!!editField} onOpenChange={v => !v && setEditField(null)}>

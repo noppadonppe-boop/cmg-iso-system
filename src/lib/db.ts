@@ -50,6 +50,19 @@ export async function getDepartments(): Promise<Department[]> {
   return toSnaps<Department>(qs);
 }
 
+export async function createDepartment(data: Omit<Department, "id">) {
+  const ref = await addDoc(rootCol("departments"), data);
+  return ref.id;
+}
+
+export async function updateDepartment(id: string, data: Partial<Department>) {
+  await updateDoc(doc(db, "cmg-iso-system", "root", "departments", id), data);
+}
+
+export async function deleteDepartment(id: string) {
+  await deleteDoc(doc(db, "cmg-iso-system", "root", "departments", id));
+}
+
 // ── Users ─────────────────────────────────────────────────────────────────────
 export async function getUsers(): Promise<User[]> {
   const qs = await getDocs(query(rootCol("users"), orderBy("name")));
@@ -62,8 +75,17 @@ export async function getAuditors(): Promise<AuditorProfile[]> {
   return toSnaps<AuditorProfile>(qs);
 }
 
+export async function createAuditor(data: Omit<AuditorProfile, "id">) {
+  const ref = await addDoc(rootCol("auditorProfiles"), data);
+  return ref.id;
+}
+
 export async function updateAuditor(id: string, data: Partial<AuditorProfile>) {
   await updateDoc(doc(db, "cmg-iso-system", "root", "auditorProfiles", id), data);
+}
+
+export async function deleteAuditor(id: string) {
+  await deleteDoc(doc(db, "cmg-iso-system", "root", "auditorProfiles", id));
 }
 
 // ── Audit Plans ───────────────────────────────────────────────────────────────
@@ -80,8 +102,17 @@ export async function getAudit(id: string): Promise<AuditPlan | null> {
   return d.exists() ? toSnap<AuditPlan>(d) : null;
 }
 
+export async function createAudit(data: Omit<AuditPlan, "id">) {
+  const ref = await addDoc(rootCol("auditPlans"), data);
+  return ref.id;
+}
+
 export async function updateAudit(id: string, data: Partial<AuditPlan>) {
   await updateDoc(doc(db, "cmg-iso-system", "root", "auditPlans", id), data);
+}
+
+export async function deleteAudit(id: string) {
+  await deleteDoc(doc(db, "cmg-iso-system", "root", "auditPlans", id));
 }
 
 // ── CPAR ──────────────────────────────────────────────────────────────────────
@@ -103,8 +134,25 @@ export async function getCpar(id: string): Promise<CPAR | null> {
   return d.exists() ? toSnap<CPAR>(d) : null;
 }
 
+export function generateCparId(): string {
+  return doc(rootCol("cpars")).id;
+}
+
+export async function createCpar(data: Omit<CPAR, "id">, id?: string) {
+  if (id) {
+    await setDoc(doc(db, "cmg-iso-system", "root", "cpars", id), data);
+    return id;
+  }
+  const ref = await addDoc(rootCol("cpars"), data);
+  return ref.id;
+}
+
 export async function updateCpar(id: string, data: Partial<CPAR>) {
   await updateDoc(doc(db, "cmg-iso-system", "root", "cpars", id), data);
+}
+
+export async function deleteCpar(id: string) {
+  await deleteDoc(doc(db, "cmg-iso-system", "root", "cpars", id));
 }
 
 // ── Management Reviews ────────────────────────────────────────────────────────
@@ -116,7 +164,15 @@ export async function getManagementReviews(yearId?: string): Promise<ManagementR
   return toSnaps<ManagementReview>(qs).map(m => ({ ...m, meetingDate: fromTs(m.meetingDate) }));
 }
 
-export async function createManagementReview(data: Omit<ManagementReview, "id">) {
+export function generateMeetingId(): string {
+  return doc(rootCol("managementReviews")).id;
+}
+
+export async function createManagementReview(data: Omit<ManagementReview, "id">, id?: string) {
+  if (id) {
+    await setDoc(doc(db, "cmg-iso-system", "root", "managementReviews", id), data);
+    return id;
+  }
   const ref = await addDoc(rootCol("managementReviews"), data);
   return ref.id;
 }
@@ -184,9 +240,21 @@ export async function getMoc(id: string): Promise<MOC | null> {
   return d.exists() ? toSnap<MOC>(d) : null;
 }
 
-export async function createMoc(data: Omit<MOC, "id">) {
+export function generateMocId(): string {
+  return doc(rootCol("mocs")).id;
+}
+
+export async function createMoc(data: Omit<MOC, "id">, id?: string) {
+  if (id) {
+    await setDoc(doc(db, "cmg-iso-system", "root", "mocs", id), data);
+    return id;
+  }
   const ref = await addDoc(rootCol("mocs"), data);
   return ref.id;
+}
+
+export async function deleteMoc(id: string) {
+  await deleteDoc(doc(db, "cmg-iso-system", "root", "mocs", id));
 }
 
 export async function updateMoc(id: string, data: Partial<MOC>) {
@@ -210,6 +278,10 @@ export async function createDocument(data: Omit<Document, "id">) {
 
 export async function updateDocument(id: string, data: Partial<Document>) {
   await updateDoc(doc(db, "cmg-iso-system", "root", "documents", id), data);
+}
+
+export async function deleteDocument(id: string) {
+  await deleteDoc(doc(db, "cmg-iso-system", "root", "documents", id));
 }
 
 // ── Seed helper (used by seed script) ────────────────────────────────────────

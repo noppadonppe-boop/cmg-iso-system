@@ -12,11 +12,15 @@ import {
   FileText, Search, Plus, Printer, ExternalLink, RefreshCw, Loader2,
   BookOpen, ClipboardList, FileCheck, Globe, Archive,
   AlertCircle, CheckCircle, Clock, Eye, Link2,
+  Pencil, Trash2, Upload,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
-import { getDocuments, getDepartments, getUsers, createDocument } from "@/lib/db";
-import type { Document, Department } from "@/lib/types";
+import { getDocuments, getDepartments, createDocument, updateDocument, deleteDocument } from "@/lib/db";
+import { listAllUsers } from "@/lib/authService";
+import { storage } from "@/lib/firebase";
+import { ref as storageRef, uploadBytesResumable, getDownloadURL } from "firebase/storage";
+import type { Document, Department, UserProfile, AuditAttachment } from "@/lib/types";
 
 const CATEGORIES = [
   { key: "POLICY",           label: "Policy",           short: "POL", icon: BookOpen,     color: "bg-purple-100 text-purple-700 border-purple-200" },
@@ -46,26 +50,42 @@ const deptColors: Record<string, string> = {
 export default function DocumentsPage() {
   const [docs,       setDocs]       = useState<Document[]>([]);
   const [depts,      setDepts]      = useState<Department[]>([]);
-  const [users,      setUsers]      = useState<{id:string;name:string}[]>([]);
+  const [users,      setUsers]      = useState<UserProfile[]>([]);
   const [loading,    setLoading]    = useState(true);
   const [search,     setSearch]     = useState("");
   const [filterCat,  setFilterCat]  = useState("ALL");
   const [filterDept, setFilterDept] = useState("ALL");
   const [filterStat, setFilterStat] = useState("ALL");
   const [selected,   setSelected]   = useState<Document | null>(null);
-  const [showNew,    setShowNew]    = useState(false);
+  const [showForm,   setShowForm]   = useState(false);
+  const [editing,    setEditing]    = useState<Document | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [saving,     setSaving]     = useState(false);
+  const [uploading,  setUploading]  = useState(false);
+  const [uploadPct,  setUploadPct]  = useState(0);
   const [formErr,    setFormErr]    = useState("");
   const [form, setForm] = useState({
     docNo:"", title:"", category:"PROCEDURE", departmentId:"", ownerId:"",
-    revision:"Rev.1", status:"DRAFT", issuedDate:"", nextReviewDate:"", fileUrl:"", description:"",
+    revision:"Rev.1", status:"DRAFT", issuedDate:"", nextReviewDate:"", description:"",
+    attachments: [] as AuditAttachment[],
   });
-  const printRef = useRef<HTMLDivElement>(null);
+  const printRef   = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const tempDocIdRef = useRef<string>(`new_${Date.now()}`);
+
+  function formatBytes(b: number) {
+    if (!b) return "";
+    if (b < 1024) return `${b} B`;
+    if (b < 1048576) return `${(b / 1024).toFixed(1)} KB`;
+    return `${(b / 1048576).toFixed(1)} MB`;
+  }
+
+  const BLANK_FORM = { docNo:"", title:"", category:"PROCEDURE", departmentId:"", ownerId:"", revision:"Rev.1", status:"DRAFT", issuedDate:"", nextReviewDate:"", description:"", attachments: [] as AuditAttachment[] };
 
   const fetchDocs = useCallback(async () => {
     setLoading(true);
     try {
-      const [d, de, u] = await Promise.all([getDocuments(), getDepartments(), getUsers()]);
+      const [d, de, u] = await Promise.all([getDocuments(), getDepartments(), listAllUsers()]);
       setDocs(d); setDepts(de); setUsers(u);
     } finally { setLoading(false); }
   }, []);
@@ -88,25 +108,93 @@ export default function DocumentsPage() {
   const underReview = docs.filter(d => d.status === "UNDER_REVIEW").length;
   const overdueRev  = docs.filter(d => d.status === "ACTIVE" && isOverdue(d.nextReviewDate)).length;
 
-  const handleCreate = async () => {
+  function openNew() {
+    tempDocIdRef.current = `new_${Date.now()}`;
+    setEditing(null); setForm(BLANK_FORM); setFormErr(""); setShowForm(true);
+  }
+  function openEdit(doc: Document) {
+    setEditing(doc);
+    setForm({
+      docNo: doc.docNo, title: doc.title, category: doc.category,
+      departmentId: doc.departmentId, ownerId: doc.ownerId,
+      revision: doc.revision, status: doc.status,
+      issuedDate: doc.issuedDate?.substring(0,10) ?? "",
+      nextReviewDate: doc.nextReviewDate?.substring(0,10) ?? "",
+      description: doc.description,
+      attachments: doc.attachments ?? [],
+    });
+    setFormErr(""); setShowForm(true);
+  }
+
+  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    if (!e.target.files?.[0]) return;
+    const file = e.target.files[0];
+    setUploading(true); setUploadPct(0);
+    try {
+      const docId = editing?.id ?? tempDocIdRef.current;
+      const path = `documents/${docId}/${Date.now()}_${file.name}`;
+      const sRef = storageRef(storage, path);
+      const task = uploadBytesResumable(sRef, file);
+      await new Promise<void>((resolve, reject) => {
+        task.on("state_changed", snap => setUploadPct(Math.round((snap.bytesTransferred / snap.totalBytes) * 100)), reject, resolve);
+      });
+      const url = await getDownloadURL(task.snapshot.ref);
+      const att: AuditAttachment = { name: file.name, url, size: file.size, uploadedAt: new Date().toISOString() };
+      setForm(f => ({ ...f, attachments: [...f.attachments, att] }));
+    } finally {
+      setUploading(false); setUploadPct(0);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  async function handleCreate() {
     setFormErr("");
     if (!form.docNo || !form.title || !form.departmentId || !form.ownerId) { setFormErr("กรุณากรอกข้อมูลที่จำเป็น"); return; }
     setSaving(true);
+    const ownerUser = users.find(u => u.uid === form.ownerId);
+    const ownerName = ownerUser ? `${ownerUser.firstName} ${ownerUser.lastName}` : "";
     try {
       await createDocument({
         ...form,
-        fileUrl: form.fileUrl || null,
+        fileUrl: null,
         relatedCparId: null, relatedMocId: null,
         issuedDate: form.issuedDate || new Date().toISOString(),
         nextReviewDate: form.nextReviewDate || new Date(Date.now() + 3 * 365 * 86400000).toISOString(),
+        owner: ownerUser ? { id: ownerUser.uid, name: ownerName, email: ownerUser.email, role: ownerUser.roles?.[0] ?? "", departmentId: ownerUser.departmentId ?? "" } : undefined,
+        ...(form.attachments.length ? { attachments: form.attachments } : {}),
       });
-      setShowNew(false);
-      setForm({ docNo:"", title:"", category:"PROCEDURE", departmentId:"", ownerId:"", revision:"Rev.1", status:"DRAFT", issuedDate:"", nextReviewDate:"", fileUrl:"", description:"" });
-      fetchDocs();
-    } catch (e: unknown) {
-      setFormErr(e instanceof Error ? e.message : "Failed to create");
-    } finally { setSaving(false); }
-  };
+      setShowForm(false); setForm(BLANK_FORM); fetchDocs();
+    } catch (e: unknown) { setFormErr(e instanceof Error ? e.message : "Failed to create"); }
+    finally { setSaving(false); }
+  }
+
+  async function handleEdit() {
+    if (!editing) return;
+    setFormErr("");
+    if (!form.docNo || !form.title || !form.departmentId || !form.ownerId) { setFormErr("กรุณากรอกข้อมูลที่จำเป็น"); return; }
+    setSaving(true);
+    const ownerUser = users.find(u => u.uid === form.ownerId);
+    const ownerName = ownerUser ? `${ownerUser.firstName} ${ownerUser.lastName}` : (editing.owner?.name ?? "");
+    try {
+      await updateDocument(editing.id, {
+        ...form,
+        issuedDate: form.issuedDate || editing.issuedDate,
+        nextReviewDate: form.nextReviewDate || editing.nextReviewDate,
+        owner: { id: form.ownerId, name: ownerName, email: ownerUser?.email ?? editing.owner?.email ?? "", role: ownerUser?.roles?.[0] ?? editing.owner?.role ?? "", departmentId: ownerUser?.departmentId ?? editing.owner?.departmentId ?? "" },
+        attachments: form.attachments,
+      });
+      setShowForm(false); setEditing(null); setForm(BLANK_FORM); fetchDocs();
+      setSelected(null);
+    } catch (e: unknown) { setFormErr(e instanceof Error ? e.message : "Failed to update"); }
+    finally { setSaving(false); }
+  }
+
+  async function handleDelete() {
+    if (!deletingId) return;
+    setSaving(true);
+    try { await deleteDocument(deletingId); setDeletingId(null); setSelected(null); fetchDocs(); }
+    finally { setSaving(false); }
+  }
 
   return (
     <AppLayout title="Document Control">
@@ -159,7 +247,7 @@ export default function DocumentsPage() {
         </Select>
         <Button variant="outline" size="sm" onClick={fetchDocs} className="h-9"><RefreshCw className="h-4 w-4" /></Button>
         <Button variant="outline" size="sm" onClick={()=>window.print()} className="h-9"><Printer className="h-4 w-4 mr-1.5" />Print</Button>
-        <Button size="sm" onClick={()=>setShowNew(true)} className="h-9"><Plus className="h-4 w-4 mr-1.5" />Add Document</Button>
+        <Button size="sm" onClick={openNew} className="h-9"><Plus className="h-4 w-4 mr-1.5" />Add Document</Button>
       </div>
 
       <div className="flex gap-5 items-start">
@@ -248,14 +336,38 @@ export default function DocumentsPage() {
                     {selected.relatedMocId && <div className="flex items-center gap-2 text-xs text-blue-700 bg-blue-50 px-2.5 py-1.5 rounded-md border border-blue-200"><Link2 className="h-3.5 w-3.5" />MOC: <span className="font-mono font-semibold">{selected.relatedMocId}</span></div>}
                   </div>
                 )}
-                <div className="flex flex-col gap-2 pt-1 border-t border-slate-100">
-                  {selected.fileUrl ? (
-                    <a href={selected.fileUrl} target="_blank" rel="noopener noreferrer">
-                      <Button size="sm" className="w-full h-8 text-xs"><Eye className="h-3.5 w-3.5 mr-1.5" />View Document<ExternalLink className="h-3 w-3 ml-auto opacity-60" /></Button>
-                    </a>
-                  ) : (
-                    <Button size="sm" variant="outline" disabled className="w-full h-8 text-xs"><FileText className="h-3.5 w-3.5 mr-1.5" />No File Attached</Button>
-                  )}
+                {/* Attachments in detail panel */}
+                {(selected.attachments && selected.attachments.length > 0) && (
+                  <div>
+                    <p className="text-[10px] font-semibold text-slate-400 uppercase mb-1.5">Attachments</p>
+                    <div className="space-y-1">
+                      {selected.attachments.map((att, i) => (
+                        <a key={i} href={att.url} target="_blank" rel="noopener noreferrer"
+                          className="flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-blue-100 bg-blue-50 hover:bg-blue-100 transition-colors">
+                          <FileText className="h-3.5 w-3.5 text-blue-600 shrink-0" />
+                          <span className="text-xs text-blue-700 truncate flex-1">{att.name}</span>
+                          <ExternalLink className="h-3 w-3 text-blue-400 shrink-0" />
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {/* Legacy fileUrl support */}
+                {selected.fileUrl && (
+                  <a href={selected.fileUrl} target="_blank" rel="noopener noreferrer">
+                    <Button size="sm" className="w-full h-8 text-xs"><Eye className="h-3.5 w-3.5 mr-1.5" />View Document<ExternalLink className="h-3 w-3 ml-auto opacity-60" /></Button>
+                  </a>
+                )}
+                {!selected.fileUrl && (!selected.attachments || selected.attachments.length === 0) && (
+                  <Button size="sm" variant="outline" disabled className="w-full h-8 text-xs"><FileText className="h-3.5 w-3.5 mr-1.5" />No File Attached</Button>
+                )}
+                <div className="flex gap-2 pt-1 border-t border-slate-100">
+                  <Button size="sm" variant="outline" className="flex-1 h-8 text-xs" onClick={() => openEdit(selected)}>
+                    <Pencil className="h-3.5 w-3.5 mr-1" />Edit
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-8 text-xs text-red-600 border-red-200 hover:bg-red-50" onClick={() => setDeletingId(selected.id)}>
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
                 </div>
               </CardContent>
             </Card>
@@ -263,10 +375,12 @@ export default function DocumentsPage() {
         )}
       </div>
 
-      {/* New Document Dialog */}
-      <Dialog open={showNew} onOpenChange={v => { setShowNew(v); setFormErr(""); }}>
+      {/* New / Edit Document Dialog */}
+      <Dialog open={showForm} onOpenChange={v => { if (!v) { setShowForm(false); setEditing(null); setFormErr(""); } }}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle className="flex items-center gap-2"><Plus className="h-4 w-4" />New Document</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="flex items-center gap-2">
+            {editing ? <><Pencil className="h-4 w-4 text-blue-600" />Edit Document</> : <><Plus className="h-4 w-4" />New Document</>}
+          </DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
             <div className="grid grid-cols-2 gap-3">
               <div><Label className="text-xs">Doc No *</Label><Input value={form.docNo} onChange={e=>setForm(f=>({...f,docNo:e.target.value}))} placeholder="e.g. QP-QMS-005" className="mt-1 h-9 text-sm font-mono" /></div>
@@ -289,7 +403,7 @@ export default function DocumentsPage() {
               <div><Label className="text-xs">Owner *</Label>
                 <Select value={form.ownerId} onValueChange={v=>setForm(f=>({...f,ownerId:v}))}>
                   <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue placeholder="Select owner" /></SelectTrigger>
-                  <SelectContent>{users.map(u=><SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent>
+                  <SelectContent>{users.map(u=><SelectItem key={u.uid} value={u.uid}>{u.firstName} {u.lastName}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
             </div>
@@ -306,12 +420,65 @@ export default function DocumentsPage() {
               <div><Label className="text-xs">Issued Date</Label><Input type="date" value={form.issuedDate.substring(0,10)} onChange={e=>setForm(f=>({...f,issuedDate:e.target.value}))} className="mt-1 h-9 text-sm" /></div>
               <div><Label className="text-xs">Next Review</Label><Input type="date" value={form.nextReviewDate.substring(0,10)} onChange={e=>setForm(f=>({...f,nextReviewDate:e.target.value}))} className="mt-1 h-9 text-sm" /></div>
             </div>
-            <div><Label className="text-xs">File URL (optional)</Label><Input value={form.fileUrl} onChange={e=>setForm(f=>({...f,fileUrl:e.target.value}))} placeholder="https://..." className="mt-1 h-9 text-sm" /></div>
+            {/* Attachments */}
+            <div>
+              <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Attachments</Label>
+              {form.attachments.length > 0 && (
+                <div className="space-y-1.5 mt-1.5">
+                  {form.attachments.map((att, idx) => (
+                    <div key={idx} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-blue-200 bg-blue-50 group">
+                      <FileText className="h-4 w-4 text-blue-600 shrink-0" />
+                      <a href={att.url} target="_blank" rel="noopener noreferrer"
+                        className="flex-1 min-w-0 text-xs text-blue-700 hover:underline truncate flex items-center gap-1">
+                        {att.name}<ExternalLink className="h-2.5 w-2.5 shrink-0" />
+                      </a>
+                      {att.size > 0 && <span className="text-[10px] text-slate-400 shrink-0">{formatBytes(att.size)}</span>}
+                      <button type="button"
+                        onClick={() => setForm(f => ({ ...f, attachments: f.attachments.filter((_, i) => i !== idx) }))}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity text-red-400 hover:text-red-600 shrink-0">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <input ref={fileInputRef} type="file" className="hidden"
+                accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.doc,.docx" onChange={handleFileUpload} />
+              <Button type="button" variant="outline" size="sm" disabled={uploading}
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full h-8 text-xs mt-1.5 gap-2 border-dashed border-slate-300 hover:border-blue-400 hover:text-blue-600">
+                {uploading
+                  ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Uploading... {uploadPct}%</>
+                  : <><Upload className="h-3.5 w-3.5" />Attach File (max 20 MB)</>}
+              </Button>
+            </div>
             {formErr && <p className="text-sm text-red-500 flex items-center gap-1"><AlertCircle className="h-4 w-4" />{formErr}</p>}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={()=>setShowNew(false)}>Cancel</Button>
-            <Button onClick={handleCreate} disabled={saving}>{saving?<Loader2 className="h-4 w-4 animate-spin mr-1"/>:<Plus className="h-4 w-4 mr-1"/>}Create Document</Button>
+            <Button variant="outline" onClick={()=>{setShowForm(false);setEditing(null);}}>Cancel</Button>
+            <Button onClick={editing ? handleEdit : handleCreate} disabled={saving || uploading}>
+              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : editing ? <Pencil className="h-4 w-4 mr-1" /> : <Plus className="h-4 w-4 mr-1" />}
+              {editing ? "Save Changes" : "Create Document"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirm Dialog */}
+      <Dialog open={!!deletingId} onOpenChange={v => !v && setDeletingId(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle className="text-red-600">Delete Document</DialogTitle></DialogHeader>
+          <div className="text-sm text-slate-600 space-y-2">
+            <p>Delete <span className="font-semibold">"{ docs.find(d => d.id === deletingId)?.title }"</span>?</p>
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-3 py-2 rounded-lg">
+              ⚠️ การลบจะลบข้อมูลออกจากระบบถาวร แต่ไฟล์ใน Storage จะยังคงอยู่
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeletingId(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDelete} disabled={saving}>
+              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Trash2 className="h-4 w-4 mr-1" />}Delete
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
