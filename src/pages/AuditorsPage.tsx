@@ -4,6 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { getAuditors, createAuditor, updateAuditor, deleteAuditor } from "@/lib/db";
@@ -22,6 +23,8 @@ export default function AuditorsPage() {
   const [selected,    setSelected]    = useState<AuditorProfile | null>(null);
   const [showAdd,     setShowAdd]     = useState(false);
   const [addUserId,   setAddUserId]   = useState("");
+  const [addFirstName, setAddFirstName] = useState("");
+  const [addLastName,  setAddLastName]  = useState("");
   const [editing,     setEditing]     = useState<AuditorProfile | null>(null);
   const [editForm,    setEditForm]    = useState({
     iso9001ExamPassed: false, iso45001ExamPassed: false,
@@ -49,19 +52,30 @@ export default function AuditorsPage() {
 
   const availableUsers = allUsers.filter(u => !auditors.some(a => a.userId === u.uid));
 
+  function resetAddForm() {
+    setAddUserId("");
+    setAddFirstName("");
+    setAddLastName("");
+  }
+
   async function handleAddAuditor() {
-    if (!addUserId) return;
+    const firstName = addFirstName.trim();
+    const lastName = addLastName.trim();
+    if (!addUserId && (!firstName || !lastName)) return;
     setSaving(true);
     try {
-      const u = allUsers.find(x => x.uid === addUserId)!;
+      const u = addUserId ? allUsers.find(x => x.uid === addUserId) : undefined;
+      if (addUserId && !u) return;
       await createAuditor({
-        userId: u.uid,
-        user: { id: u.uid, name: `${u.firstName} ${u.lastName}`.trim(), email: u.email, role: u.roles?.[0] ?? "", departmentId: u.departmentId ?? "" },
+        userId: u?.uid ?? "",
+        user: u
+          ? { id: u.uid, name: `${u.firstName} ${u.lastName}`.trim(), email: u.email, role: u.roles?.[0] ?? "", departmentId: u.departmentId ?? "" }
+          : { id: "", name: `${firstName} ${lastName}`, email: "", role: "", departmentId: "" },
         isActiveAuditor: false,
         iso9001ExamPassed: false, iso45001ExamPassed: false,
         iso9001CertUrl: null, iso45001CertUrl: null,
       });
-      setShowAdd(false); setAddUserId(""); fetchData();
+      setShowAdd(false); resetAddForm(); fetchData();
     } finally { setSaving(false); }
   }
 
@@ -118,7 +132,11 @@ export default function AuditorsPage() {
       const task = uploadBytesResumable(sRef, file);
       await new Promise<void>((resolve, reject) => {
         task.on("state_changed",
-          snap => { const p = Math.round((snap.bytesTransferred / snap.totalBytes) * 100); is9001 ? setCert9001Pct(p) : setCert45001Pct(p); },
+          snap => {
+            const p = Math.round((snap.bytesTransferred / snap.totalBytes) * 100);
+            if (is9001) setCert9001Pct(p);
+            else setCert45001Pct(p);
+          },
           reject, resolve);
       });
       const url = await getDownloadURL(task.snapshot.ref);
@@ -190,57 +208,102 @@ export default function AuditorsPage() {
           <Button size="sm" className="mt-3 gap-1" onClick={() => setShowAdd(true)}><Plus className="h-4 w-4" />Add First Auditor</Button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {auditors.map(a => (
-            <Card key={a.id} className={cn("border transition-all", a.isActiveAuditor ? "border-green-200 bg-green-50/30" : "border-slate-200")}>
-              <CardContent className="p-4">
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-center gap-3">
-                    <div className={cn("flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold text-white shrink-0", a.isActiveAuditor ? "bg-green-600" : "bg-slate-400")}>
-                      {a.user?.name?.charAt(0)?.toUpperCase() ?? "?"}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          {auditors.map(a => {
+            const qualifications = [
+              { label: "9001 Exam", passed: a.iso9001ExamPassed },
+              { label: "45001 Exam", passed: a.iso45001ExamPassed },
+              { label: "9001 Cert", passed: !!a.iso9001CertUrl || (a.iso9001Certs?.length ?? 0) > 0 },
+              { label: "45001 Cert", passed: !!a.iso45001CertUrl || (a.iso45001Certs?.length ?? 0) > 0 },
+            ];
+            const completed = qualifications.filter(item => item.passed).length;
+
+            return (
+              <Card key={a.id} className={cn(
+                "group relative aspect-square overflow-hidden border bg-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg",
+                a.isActiveAuditor ? "border-emerald-200/80" : "border-slate-200",
+              )}>
+                <div className={cn("h-1 w-full", a.isActiveAuditor ? "bg-gradient-to-r from-emerald-500 to-teal-400" : "bg-gradient-to-r from-slate-300 to-slate-200")} />
+                <CardContent className="flex h-[calc(100%-4px)] flex-col p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div className="relative shrink-0">
+                        <div className={cn(
+                          "flex h-10 w-10 items-center justify-center rounded-xl text-sm font-bold text-white shadow-sm",
+                          a.isActiveAuditor ? "bg-gradient-to-br from-emerald-500 to-teal-600" : "bg-gradient-to-br from-slate-400 to-slate-500",
+                        )}>
+                          {a.user?.name?.charAt(0)?.toUpperCase() ?? "?"}
+                        </div>
+                        <span className={cn(
+                          "absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border-2 border-white",
+                          a.isActiveAuditor ? "bg-emerald-500" : "bg-slate-300",
+                        )}>
+                          <ShieldCheck className="h-3 w-3 text-white" />
+                        </span>
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-slate-900">{a.user?.name ?? "—"}</p>
+                        <p className="mt-0.5 truncate text-xs text-slate-500">{a.user?.email || "Manual entry"}</p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="font-semibold text-sm text-slate-800">{a.user?.name ?? "—"}</p>
-                      <p className="text-xs text-slate-500 truncate max-w-[140px]">{a.user?.email ?? ""}</p>
+                    <Badge className={cn(
+                      "shrink-0 gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold shadow-none",
+                      a.isActiveAuditor
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                        : "border-slate-200 bg-slate-50 text-slate-500",
+                    )}>
+                      <span className={cn("h-1.5 w-1.5 rounded-full", a.isActiveAuditor ? "bg-emerald-500" : "bg-slate-400")} />
+                      {a.isActiveAuditor ? "Active" : "Inactive"}
+                    </Badge>
+                  </div>
+
+                  <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50/80 p-3">
+                    <div className="mb-2.5 flex items-center justify-between">
+                      <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Qualification</span>
+                      <span className={cn("text-xs font-bold", completed === 4 ? "text-emerald-600" : "text-slate-600")}>{completed}/4</span>
+                    </div>
+                    <div className="mb-2.5 h-1.5 overflow-hidden rounded-full bg-slate-200">
+                      <div
+                        className={cn("h-full rounded-full transition-all", completed === 4 ? "bg-emerald-500" : "bg-blue-500")}
+                        style={{ width: `${completed * 25}%` }}
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {qualifications.map(item => (
+                        <div key={item.label} className={cn(
+                          "flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[10px] font-medium",
+                          item.passed ? "border-emerald-100 bg-white text-emerald-700" : "border-slate-100 bg-white/70 text-slate-400",
+                        )}>
+                          {item.passed
+                            ? <CheckCircle className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
+                            : <XCircle className="h-3.5 w-3.5 shrink-0 text-slate-300" />}
+                          {item.label}
+                        </div>
+                      ))}
                     </div>
                   </div>
-                  <Badge className={cn("text-[10px] border shrink-0", a.isActiveAuditor ? "bg-green-100 text-green-700 border-green-200" : "bg-slate-100 text-slate-500 border-slate-200")}>
-                    {a.isActiveAuditor ? "Active" : "Inactive"}
-                  </Badge>
-                </div>
 
-                <div className="space-y-1.5 mb-3">
-                  {[
-                    { label: "ISO 9001 Exam",  passed: a.iso9001ExamPassed },
-                    { label: "ISO 45001 Exam", passed: a.iso45001ExamPassed },
-                    { label: "ISO 9001 Cert",  passed: !!a.iso9001CertUrl  || (a.iso9001Certs?.length  ?? 0) > 0 },
-                    { label: "ISO 45001 Cert", passed: !!a.iso45001CertUrl || (a.iso45001Certs?.length ?? 0) > 0 },
-                  ].map(item => (
-                    <div key={item.label} className="flex items-center justify-between text-xs">
-                      <span className="text-slate-600">{item.label}</span>
-                      {item.passed ? <CheckCircle className="h-3.5 w-3.5 text-green-600" /> : <XCircle className="h-3.5 w-3.5 text-slate-300" />}
-                    </div>
-                  ))}
-                </div>
-
-                <div className="flex gap-1.5">
-                  <Button size="sm" variant="outline" className="flex-1 h-8 text-xs" onClick={() => setSelected(a)}>
-                    <Award className="h-3.5 w-3.5 mr-1" />Details
-                  </Button>
-                  <Button size="sm" variant="outline" className="h-8 text-xs px-2" onClick={() => openEdit(a)}>
-                    <Pencil className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button size="sm" className={cn("flex-1 h-8 text-xs", a.isActiveAuditor ? "bg-red-600 hover:bg-red-700" : "bg-green-600 hover:bg-green-700")}
-                    onClick={() => toggleActive(a)} disabled={saving}>
-                    {a.isActiveAuditor ? "Deactivate" : "Activate"}
-                  </Button>
-                  <Button size="sm" variant="ghost" className="h-8 px-2 text-slate-300 hover:text-red-500 hover:bg-red-50" onClick={() => setDeletingId(a.id)}>
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                  <div className="mt-auto flex items-center gap-1.5 border-t border-slate-100 pt-3">
+                    <Button size="sm" variant="outline" className="h-8 flex-1 rounded-lg px-2 text-[11px]" onClick={() => setSelected(a)}>
+                      <Award className="mr-1.5 h-3.5 w-3.5" />Details
+                    </Button>
+                    <Button size="sm" variant="outline" className="h-8 rounded-lg px-2.5 text-xs" onClick={() => openEdit(a)} title="Edit auditor">
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button size="sm" className={cn(
+                      "h-8 flex-1 rounded-lg px-2 text-[11px] shadow-sm",
+                      a.isActiveAuditor ? "bg-slate-700 hover:bg-slate-800" : "bg-emerald-600 hover:bg-emerald-700",
+                    )} onClick={() => toggleActive(a)} disabled={saving}>
+                      {a.isActiveAuditor ? "Deactivate" : "Activate"}
+                    </Button>
+                    <Button size="sm" variant="ghost" className="h-8 rounded-lg px-2 text-slate-300 hover:bg-red-50 hover:text-red-500" onClick={() => setDeletingId(a.id)} title="Delete auditor">
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       )}
 
@@ -292,25 +355,54 @@ export default function AuditorsPage() {
       </Dialog>
 
       {/* ── Add Auditor Dialog ── */}
-      <Dialog open={showAdd} onOpenChange={v => { setShowAdd(v); if (!v) setAddUserId(""); }}>
-        <DialogContent className="max-w-sm">
+      <Dialog open={showAdd} onOpenChange={v => { setShowAdd(v); if (!v) resetAddForm(); }}>
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader><DialogTitle className="flex items-center gap-2"><Plus className="h-5 w-5 text-blue-600" />Add Auditor</DialogTitle></DialogHeader>
-          <div className="py-2">
-            <Label className="text-xs">Select User <span className="text-red-500">*</span></Label>
-            <Select value={addUserId} onValueChange={setAddUserId}>
-              <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue placeholder="Select user to add as auditor" /></SelectTrigger>
-              <SelectContent>
-                {availableUsers.length === 0
-                  ? <SelectItem value="__none__" disabled>All users are already auditors</SelectItem>
-                  : availableUsers.map(u => <SelectItem key={u.uid} value={u.uid}>{u.firstName} {u.lastName} — {u.email}</SelectItem>)
-                }
-              </SelectContent>
-            </Select>
+          <div className="space-y-4 py-2">
+            <div>
+              <Label className="text-xs">Select User <span className="font-normal text-slate-400">(optional)</span></Label>
+              <Select value={addUserId} onValueChange={value => setAddUserId(value === "__manual__" ? "" : value)}>
+                <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue placeholder="Select user to add as auditor" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__manual__">Enter name manually</SelectItem>
+                  {availableUsers.length === 0
+                    ? <SelectItem value="__none__" disabled>All users are already auditors</SelectItem>
+                    : availableUsers.map(u => <SelectItem key={u.uid} value={u.uid}>{u.firstName} {u.lastName} — {u.email}</SelectItem>)
+                  }
+                </SelectContent>
+              </Select>
+            </div>
+            {!addUserId && (
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label htmlFor="auditor-first-name" className="text-xs">First Name <span className="text-red-500">*</span></Label>
+                  <Input
+                    id="auditor-first-name"
+                    value={addFirstName}
+                    onChange={e => setAddFirstName(e.target.value)}
+                    placeholder="First name"
+                    autoComplete="given-name"
+                    className="mt-1 text-sm"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="auditor-last-name" className="text-xs">Last Name <span className="text-red-500">*</span></Label>
+                  <Input
+                    id="auditor-last-name"
+                    value={addLastName}
+                    onChange={e => setAddLastName(e.target.value)}
+                    placeholder="Last name"
+                    autoComplete="family-name"
+                    className="mt-1 text-sm"
+                  />
+                </div>
+              </div>
+            )}
             <p className="text-[11px] text-slate-400 mt-2">Exam status and certificates can be updated after adding.</p>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowAdd(false)}>Cancel</Button>
-            <Button disabled={saving || !addUserId} onClick={handleAddAuditor}>
+            <Button variant="outline" onClick={() => { setShowAdd(false); resetAddForm(); }}>Cancel</Button>
+            <Button disabled={saving || (!addUserId && (!addFirstName.trim() || !addLastName.trim()))} onClick={handleAddAuditor}>
               {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Plus className="h-4 w-4 mr-1" />}Add Auditor
             </Button>
           </DialogFooter>

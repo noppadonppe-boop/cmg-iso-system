@@ -12,9 +12,8 @@ import { getKpis, getKpiReports, getDepartments, createKpiReport, updateKpiRepor
 import { storage } from "@/lib/firebase";
 import { ref as storageRef, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import type { KPI, KPIReport, Department, AuditAttachment } from "@/lib/types";
-import { Printer, Plus, Loader2, CheckCircle, AlertCircle, RefreshCw, Pencil, Upload, FileText, ExternalLink, Trash2 } from "lucide-react";
+import { Printer, Loader2, CheckCircle, AlertCircle, RefreshCw, Pencil, Upload, FileText, ExternalLink, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { format } from "date-fns";
 
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
@@ -29,8 +28,7 @@ function statusCell(report?: KPIReport, monthIdx?: number, currentYear?: number)
       ? <span className="text-slate-200 text-xs">—</span>
       : <span className="cell-missing text-xs font-medium text-orange-500">Missing</span>;
   }
-  if (report.status === "ON_TIME") return <span className="cell-on-time text-xs font-semibold text-green-700">✓</span>;
-  return <span className="cell-late text-xs font-semibold text-red-600">LATE</span>;
+  return <span className="cell-on-time text-xs font-semibold text-green-700">✓</span>;
 }
 
 export default function KpiReportsPage() {
@@ -158,7 +156,6 @@ export default function KpiReportsPage() {
             <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
           </Button>
           <Button variant="outline" size="sm" onClick={()=>window.print()} className="h-9"><Printer className="h-4 w-4 mr-1.5"/>Print</Button>
-          <Button size="sm" onClick={()=>setShowNew(true)} className="h-9"><Plus className="h-4 w-4 mr-1.5"/>Submit Report</Button>
         </div>
       </div>
 
@@ -212,7 +209,7 @@ export default function KpiReportsPage() {
                           <td key={mi} className="px-1 py-2.5 text-center">
                             {r ? (
                               <button
-                                title={`${r.value} ${kpi.unit} — ${r.status} (คลิกเพื่อแก้ไข)`}
+                                title={`${r.value} ${kpi.unit} (คลิกเพื่อแก้ไข)`}
                                 onClick={() => { setEditReport(r); setEditValue(String(r.value)); }}
                                 className="group relative inline-flex items-center justify-center w-8 h-6 rounded hover:bg-slate-100 transition-colors">
                                 <span className="group-hover:opacity-0 transition-opacity">{statusCell(r, mi, selectedYear?.year)}</span>
@@ -247,42 +244,39 @@ export default function KpiReportsPage() {
 
       {/* Submit Dialog */}
       <Dialog open={showNew} onOpenChange={v=>{ if (!v) { setShowNew(false); setErr(""); setForm({ kpiId:"", reportMonth:"", value:"", attachments: [] }); tempIdRef.current = `new_${Date.now()}`; } }}>
-        <DialogContent className="sm:max-w-[525px]">
+        <DialogContent className="min-w-0 sm:max-w-[640px]">
           <DialogHeader><DialogTitle>Submit KPI Report</DialogTitle></DialogHeader>
-          <div className="space-y-3 py-2">
-            <div><Label className="text-xs">KPI *</Label>
-              <Select value={form.kpiId} onValueChange={v=>setForm(f=>({...f,kpiId:v}))}>
-                <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue placeholder="Select KPI"/></SelectTrigger>
-                <SelectContent className="max-h-64">
-                  {kpis.map(k => {
-                    const dept = depts.find(d => d.id === k.departmentId);
-                    return (
-                      <SelectItem key={k.id} value={k.id}>
-                        <span className="text-slate-500 font-mono text-[11px] mr-1.5">[{dept?.code ?? "?"}]</span>{k.name}
-                      </SelectItem>
-                    );
-                  })}
-                </SelectContent>
-              </Select>
+          <div className="min-w-0 space-y-3 py-2">
+            <div className="min-w-0"><Label className="text-xs">KPI *</Label>
+              {(() => {
+                const kpi = kpis.find(k => k.id === form.kpiId);
+                const dept = depts.find(d => d.id === kpi?.departmentId);
+                return (
+                  <div className="mt-1 flex min-h-10 min-w-0 items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+                    <span className="shrink-0 font-mono text-[11px] text-slate-500">[{dept?.code ?? "?"}]</span>
+                    <span className="min-w-0 font-medium text-slate-800">{kpi?.name ?? "—"}</span>
+                  </div>
+                );
+              })()}
             </div>
             {form.kpiId && (() => {
               const k = kpis.find(x => x.id === form.kpiId);
               if (!k) return null;
               return (
-                <div className="px-3 py-2 rounded-lg bg-slate-50 border border-slate-100 text-xs text-slate-500 space-y-0.5">
+                <div className="min-w-0 px-3 py-2 rounded-lg bg-slate-50 border border-slate-100 text-xs text-slate-500 space-y-0.5 break-words">
                   <p><span className="font-medium text-slate-700">Target:</span> {k.target} {k.unit}</p>
                   {k.description && <p><span className="font-medium text-slate-700">Description:</span> {k.description}</p>}
                 </div>
               );
             })()}
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label className="text-xs">Month *</Label>
+            <div className="grid min-w-0 grid-cols-2 gap-3">
+              <div className="min-w-0"><Label className="text-xs">Month *</Label>
                 <Select value={form.reportMonth} onValueChange={v=>setForm(f=>({...f,reportMonth:v}))}>
-                  <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue placeholder="Select month"/></SelectTrigger>
+                  <SelectTrigger className="mt-1 h-9 w-full min-w-0 text-sm"><SelectValue placeholder="Select month"/></SelectTrigger>
                   <SelectContent>{MONTHS.map((m,i)=><SelectItem key={i+1} value={String(i+1)}>{m}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
-              <div>
+              <div className="min-w-0">
                 <Label className="text-xs">
                   Value *
                   {form.kpiId && (() => { const u = kpis.find(x=>x.id===form.kpiId)?.unit; return u ? <span className="text-slate-400 ml-1">({u})</span> : null; })()}
