@@ -11,7 +11,7 @@ import { getAuditors, createAuditor, updateAuditor, deleteAuditor } from "@/lib/
 import { listAllUsers } from "@/lib/authService";
 import { storage } from "@/lib/firebase";
 import { ref as storageRef, uploadBytesResumable, getDownloadURL } from "firebase/storage";
-import type { AuditorProfile, UserProfile, AuditAttachment } from "@/lib/types";
+import type { AuditorProfile, UserProfile, AuditAttachment, AuditorAttachment } from "@/lib/types";
 import { ShieldCheck, Loader2, RefreshCw, CheckCircle, XCircle, Award, Plus, Trash2, Pencil, Upload, FileText, ExternalLink, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -30,15 +30,22 @@ export default function AuditorsPage() {
     iso9001ExamPassed: false, iso45001ExamPassed: false,
     iso9001Certs: [] as AuditAttachment[],
     iso45001Certs: [] as AuditAttachment[],
+    internalAttachments: [] as AuditorAttachment[],
+    externalAttachments: [] as AuditorAttachment[],
   });
   const [deletingId,  setDeletingId]  = useState<string | null>(null);
   const [activateErr, setActivateErr] = useState<string | null>(null);
   const cert9001Ref    = useRef<HTMLInputElement>(null);
   const cert45001Ref   = useRef<HTMLInputElement>(null);
+  const internalFilesRef = useRef<HTMLInputElement>(null);
+  const externalFilesRef = useRef<HTMLInputElement>(null);
   const [cert9001Up,   setCert9001Up]   = useState(false);
   const [cert9001Pct,  setCert9001Pct]  = useState(0);
   const [cert45001Up,  setCert45001Up]  = useState(false);
   const [cert45001Pct, setCert45001Pct] = useState(0);
+  const [uploadingCategory, setUploadingCategory] = useState<"internal" | "external" | null>(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -94,7 +101,15 @@ export default function AuditorsPage() {
     const to45001 = a.iso45001Certs?.length
       ? a.iso45001Certs
       : a.iso45001CertUrl ? [{ name: "ISO 45001 Certificate", url: a.iso45001CertUrl, size: 0, uploadedAt: "" }] : [];
-    setEditForm({ iso9001ExamPassed: a.iso9001ExamPassed, iso45001ExamPassed: a.iso45001ExamPassed, iso9001Certs: to9001, iso45001Certs: to45001 });
+    setEditForm({
+      iso9001ExamPassed: a.iso9001ExamPassed,
+      iso45001ExamPassed: a.iso45001ExamPassed,
+      iso9001Certs: to9001,
+      iso45001Certs: to45001,
+      internalAttachments: a.internalAttachments ?? [],
+      externalAttachments: a.externalAttachments ?? [],
+    });
+    setUploadError(null);
     setEditing(a);
   }
 
@@ -109,6 +124,8 @@ export default function AuditorsPage() {
         iso45001Certs: editForm.iso45001Certs.length ? editForm.iso45001Certs : undefined,
         iso9001CertUrl:  editForm.iso9001Certs[0]?.url  ?? null,
         iso45001CertUrl: editForm.iso45001Certs[0]?.url ?? null,
+        internalAttachments: editForm.internalAttachments,
+        externalAttachments: editForm.externalAttachments,
       });
       setEditing(null); fetchData();
     } finally { setSaving(false); }
@@ -122,31 +139,101 @@ export default function AuditorsPage() {
   }
 
   async function handleCertUpload(certType: "9001" | "45001", e: React.ChangeEvent<HTMLInputElement>) {
-    if (!e.target.files?.[0] || !editing) return;
-    const file = e.target.files[0];
+    if (!e.target.files?.length || !editing) return;
+    const files = Array.from(e.target.files);
+    const maxFileSize = 20 * 1024 * 1024;
+    const tooLarge = files.find(file => file.size > maxFileSize);
+    if (tooLarge) {
+      setUploadError(`ไฟล์ ${tooLarge.name} มีขนาดเกิน 20 MB`);
+      e.target.value = "";
+      return;
+    }
+
     const is9001 = certType === "9001";
     if (is9001) { setCert9001Up(true); setCert9001Pct(0); } else { setCert45001Up(true); setCert45001Pct(0); }
+    setUploadError(null);
     try {
-      const path = `auditorProfiles/${editing.id}/iso${certType}_${Date.now()}_${file.name}`;
-      const sRef = storageRef(storage, path);
-      const task = uploadBytesResumable(sRef, file);
-      await new Promise<void>((resolve, reject) => {
-        task.on("state_changed",
-          snap => {
-            const p = Math.round((snap.bytesTransferred / snap.totalBytes) * 100);
-            if (is9001) setCert9001Pct(p);
-            else setCert45001Pct(p);
-          },
-          reject, resolve);
-      });
-      const url = await getDownloadURL(task.snapshot.ref);
-      const att: AuditAttachment = { name: file.name, url, size: file.size, uploadedAt: new Date().toISOString() };
+      const uploaded: AuditAttachment[] = [];
+      for (const [index, file] of files.entries()) {
+        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const path = `auditorProfiles/${editing.id}/iso${certType}/${Date.now()}_${index}_${safeName}`;
+        const task = uploadBytesResumable(storageRef(storage, path), file);
+        await new Promise<void>((resolve, reject) => {
+          task.on("state_changed",
+            snap => {
+              const progress = Math.round(((index + snap.bytesTransferred / snap.totalBytes) / files.length) * 100);
+              if (is9001) setCert9001Pct(progress);
+              else setCert45001Pct(progress);
+            },
+            reject,
+            resolve,
+          );
+        });
+        uploaded.push({
+          name: file.name,
+          url: await getDownloadURL(task.snapshot.ref),
+          size: file.size,
+          uploadedAt: new Date().toISOString(),
+        });
+      }
+
       setEditForm(f => is9001
-        ? { ...f, iso9001Certs:  [...f.iso9001Certs,  att] }
-        : { ...f, iso45001Certs: [...f.iso45001Certs, att] });
+        ? { ...f, iso9001Certs:  [...f.iso9001Certs,  ...uploaded] }
+        : { ...f, iso45001Certs: [...f.iso45001Certs, ...uploaded] });
+    } catch {
+      setUploadError("อัปโหลดไฟล์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
     } finally {
       if (is9001) { setCert9001Up(false); setCert9001Pct(0); if (cert9001Ref.current) cert9001Ref.current.value = ""; }
       else         { setCert45001Up(false); setCert45001Pct(0); if (cert45001Ref.current) cert45001Ref.current.value = ""; }
+    }
+  }
+
+  async function handleAuditorFilesUpload(category: "internal" | "external", e: React.ChangeEvent<HTMLInputElement>) {
+    if (!e.target.files?.length || !editing) return;
+    const files = Array.from(e.target.files);
+    const maxFileSize = 20 * 1024 * 1024;
+    const tooLarge = files.find(file => file.size > maxFileSize);
+    if (tooLarge) {
+      setUploadError(`ไฟล์ ${tooLarge.name} มีขนาดเกิน 20 MB`);
+      e.target.value = "";
+      return;
+    }
+
+    setUploadError(null);
+    setUploadingCategory(category);
+    setUploadProgress(0);
+    try {
+      const uploaded: AuditorAttachment[] = [];
+      for (const [index, file] of files.entries()) {
+        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const path = `auditorProfiles/${editing.id}/${category}/${Date.now()}_${index}_${safeName}`;
+        const task = uploadBytesResumable(storageRef(storage, path), file);
+        await new Promise<void>((resolve, reject) => {
+          task.on("state_changed",
+            snap => setUploadProgress(Math.round(((index + snap.bytesTransferred / snap.totalBytes) / files.length) * 100)),
+            reject,
+            resolve,
+          );
+        });
+        uploaded.push({
+          name: file.name,
+          url: await getDownloadURL(task.snapshot.ref),
+          size: file.size,
+          uploadedAt: new Date().toISOString(),
+          category,
+        });
+      }
+
+      setEditForm(form => category === "internal"
+        ? { ...form, internalAttachments: [...form.internalAttachments, ...uploaded] }
+        : { ...form, externalAttachments: [...form.externalAttachments, ...uploaded] });
+    } catch {
+      setUploadError("อัปโหลดไฟล์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
+    } finally {
+      setUploadingCategory(null);
+      setUploadProgress(0);
+      if (category === "internal" && internalFilesRef.current) internalFilesRef.current.value = "";
+      if (category === "external" && externalFilesRef.current) externalFilesRef.current.value = "";
     }
   }
 
@@ -208,7 +295,7 @@ export default function AuditorsPage() {
           <Button size="sm" className="mt-3 gap-1" onClick={() => setShowAdd(true)}><Plus className="h-4 w-4" />Add First Auditor</Button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-6">
           {auditors.map(a => {
             const qualifications = [
               { label: "9001 Exam", passed: a.iso9001ExamPassed },
@@ -220,11 +307,11 @@ export default function AuditorsPage() {
 
             return (
               <Card key={a.id} className={cn(
-                "group relative aspect-square overflow-hidden border bg-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg",
+                "group relative min-h-[270px] h-full overflow-hidden border bg-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg",
                 a.isActiveAuditor ? "border-emerald-200/80" : "border-slate-200",
               )}>
                 <div className={cn("h-1 w-full", a.isActiveAuditor ? "bg-gradient-to-r from-emerald-500 to-teal-400" : "bg-gradient-to-r from-slate-300 to-slate-200")} />
-                <CardContent className="flex h-[calc(100%-4px)] flex-col p-4">
+                <CardContent className="flex min-h-[266px] flex-col p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex min-w-0 items-center gap-3">
                       <div className="relative shrink-0">
@@ -320,8 +407,8 @@ export default function AuditorsPage() {
               {([
                 ["ISO 9001 Exam",  selected?.iso9001ExamPassed  ? "✅ Passed"   : "❌ Not passed"],
                 ["ISO 45001 Exam", selected?.iso45001ExamPassed ? "✅ Passed"   : "❌ Not passed"],
-                ["ISO 9001 Cert",  selected?.iso9001CertUrl     ? "✅ Uploaded" : "❌ Missing"],
-                ["ISO 45001 Cert", selected?.iso45001CertUrl    ? "✅ Uploaded" : "❌ Missing"],
+                ["ISO 9001 Cert",  selected?.iso9001CertUrl || (selected?.iso9001Certs?.length ?? 0) > 0 ? "✅ Uploaded" : "❌ Missing"],
+                ["ISO 45001 Cert", selected?.iso45001CertUrl || (selected?.iso45001Certs?.length ?? 0) > 0 ? "✅ Uploaded" : "❌ Missing"],
               ] as [string, string][]).map(([l, v]) => (
                 <div key={l} className="bg-slate-50 rounded p-2.5 border border-slate-100">
                   <p className="text-slate-400 text-[10px] uppercase font-semibold">{l}</p>
@@ -346,6 +433,22 @@ export default function AuditorsPage() {
                 </div>
               ) : null;
             })()}
+            {(["internal", "external"] as const).map(category => {
+              const files = category === "internal" ? selected?.internalAttachments ?? [] : selected?.externalAttachments ?? [];
+              return files.length > 0 ? (
+                <div key={category} className="space-y-1">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{category} files</p>
+                  {files.map((file, index) => (
+                    <a key={`${file.url}-${index}`} href={file.url} target="_blank" rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 text-xs text-blue-600 hover:underline">
+                      <FileText className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate flex-1">{file.name}</span>
+                      <ExternalLink className="h-3 w-3 shrink-0" />
+                    </a>
+                  ))}
+                </div>
+              ) : null;
+            })}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => selected && openEdit(selected)}><Pencil className="h-3.5 w-3.5 mr-1" />Edit Certs</Button>
@@ -411,11 +514,11 @@ export default function AuditorsPage() {
 
       {/* ── Edit / Cert Upload Dialog ── */}
       <Dialog open={!!editing} onOpenChange={v => !v && setEditing(null)}>
-        <DialogContent className="sm:max-w-[480px]">
+        <DialogContent className="w-[calc(100%-1rem)] max-w-[560px] max-h-[calc(100vh-1rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden p-4 sm:p-6">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><Pencil className="h-5 w-5 text-blue-600" />Edit Auditor — {editing?.user?.name}</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 py-2 overflow-y-auto max-h-[70vh] pr-1">
+          <div className="min-h-0 space-y-4 overflow-y-auto py-2 pr-1">
 
             {/* Exam toggles */}
             <div>
@@ -454,11 +557,11 @@ export default function AuditorsPage() {
                   ))}
                 </div>
               )}
-              <input ref={cert9001Ref} type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png" onChange={e => handleCertUpload("9001", e)} />
-              <Button type="button" variant="outline" size="sm" disabled={cert9001Up || cert45001Up}
+              <input ref={cert9001Ref} type="file" multiple className="hidden" accept=".pdf,.jpg,.jpeg,.png" onChange={e => handleCertUpload("9001", e)} />
+              <Button type="button" variant="outline" size="sm" disabled={cert9001Up || cert45001Up || uploadingCategory !== null}
                 onClick={() => cert9001Ref.current?.click()}
                 className="w-full h-8 text-xs mt-1.5 gap-2 border-dashed border-slate-300 hover:border-blue-400 hover:text-blue-600">
-                {cert9001Up ? (<><Loader2 className="h-3.5 w-3.5 animate-spin" />Uploading... {cert9001Pct}%</>) : (<><Upload className="h-3.5 w-3.5" />Upload ISO 9001 Cert (max 20 MB)</>)}
+                {cert9001Up ? (<><Loader2 className="h-3.5 w-3.5 animate-spin" />Uploading... {cert9001Pct}%</>) : (<><Upload className="h-3.5 w-3.5" />Upload ISO 9001 Certs (multiple, max 20 MB/file)</>)}
               </Button>
             </div>
 
@@ -483,18 +586,64 @@ export default function AuditorsPage() {
                   ))}
                 </div>
               )}
-              <input ref={cert45001Ref} type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png" onChange={e => handleCertUpload("45001", e)} />
-              <Button type="button" variant="outline" size="sm" disabled={cert9001Up || cert45001Up}
+              <input ref={cert45001Ref} type="file" multiple className="hidden" accept=".pdf,.jpg,.jpeg,.png" onChange={e => handleCertUpload("45001", e)} />
+              <Button type="button" variant="outline" size="sm" disabled={cert9001Up || cert45001Up || uploadingCategory !== null}
                 onClick={() => cert45001Ref.current?.click()}
                 className="w-full h-8 text-xs mt-1.5 gap-2 border-dashed border-slate-300 hover:border-blue-400 hover:text-blue-600">
-                {cert45001Up ? (<><Loader2 className="h-3.5 w-3.5 animate-spin" />Uploading... {cert45001Pct}%</>) : (<><Upload className="h-3.5 w-3.5" />Upload ISO 45001 Cert (max 20 MB)</>)}
+                {cert45001Up ? (<><Loader2 className="h-3.5 w-3.5 animate-spin" />Uploading... {cert45001Pct}%</>) : (<><Upload className="h-3.5 w-3.5" />Upload ISO 45001 Certs (multiple, max 20 MB/file)</>)}
               </Button>
             </div>
+
+            {/* Internal / External supporting files */}
+            {(["internal", "external"] as const).map(category => {
+              const isInternal = category === "internal";
+              const files = isInternal ? editForm.internalAttachments : editForm.externalAttachments;
+              const inputRef = isInternal ? internalFilesRef : externalFilesRef;
+              const isUploading = uploadingCategory === category;
+              return (
+                <div key={category} className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <Label className="text-xs font-semibold uppercase tracking-wide text-slate-600">{category} files</Label>
+                      <p className="mt-0.5 text-[11px] text-slate-400">เลือกได้หลายไฟล์ · ไม่เกิน 20 MB ต่อไฟล์</p>
+                    </div>
+                    <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-medium text-slate-500">{files.length} files</span>
+                  </div>
+                  {files.length > 0 && (
+                    <div className="mt-2 space-y-1.5">
+                      {files.map((file, index) => (
+                        <div key={`${file.url}-${index}`} className="group flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
+                          <FileText className="h-4 w-4 shrink-0 text-blue-500" />
+                          <a href={file.url} target="_blank" rel="noopener noreferrer" className="min-w-0 flex-1 truncate text-xs text-slate-700 hover:underline">
+                            {file.name}
+                          </a>
+                          {file.size > 0 && <span className="shrink-0 text-[10px] text-slate-400">{formatBytes(file.size)}</span>}
+                          <button type="button" aria-label={`Remove ${category} file ${file.name}`} onClick={() => setEditForm(form => isInternal
+                            ? { ...form, internalAttachments: form.internalAttachments.filter((_, i) => i !== index) }
+                            : { ...form, externalAttachments: form.externalAttachments.filter((_, i) => i !== index) })}
+                            className="text-red-400 hover:text-red-600">
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <input ref={inputRef} type="file" multiple className="hidden" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" onChange={e => handleAuditorFilesUpload(category, e)} />
+                  <Button type="button" variant="outline" size="sm" disabled={uploadingCategory !== null || cert9001Up || cert45001Up}
+                    onClick={() => inputRef.current?.click()}
+                    className="mt-2 h-9 w-full gap-2 border-dashed border-slate-300 text-xs hover:border-blue-400 hover:text-blue-600">
+                    {isUploading ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Uploading... {uploadProgress}%</> : <><Upload className="h-3.5 w-3.5" />Upload {category} files</>}
+                  </Button>
+                </div>
+              );
+            })}
+
+            {uploadError && <p className="text-xs text-red-600">{uploadError}</p>}
 
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditing(null)}>Cancel</Button>
-            <Button onClick={handleEditSave} disabled={saving || cert9001Up || cert45001Up}>
+            <Button onClick={handleEditSave} disabled={saving || cert9001Up || cert45001Up || uploadingCategory !== null}>
               {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}Save Changes
             </Button>
           </DialogFooter>

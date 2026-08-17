@@ -78,6 +78,8 @@ export type AuditorProfile = {
   iso45001CertUrl: string | null;
   iso9001Certs?: AuditAttachment[];
   iso45001Certs?: AuditAttachment[];
+  internalAttachments?: AuditorAttachment[];
+  externalAttachments?: AuditorAttachment[];
   department?: Department;
 };
 
@@ -86,6 +88,10 @@ export type AuditAttachment = {
   url: string;
   size: number;
   uploadedAt: string;
+};
+
+export type AuditorAttachment = AuditAttachment & {
+  category: "internal" | "external";
 };
 
 export type AuditPlan = {

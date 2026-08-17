@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { useYearCycle } from "@/context/YearCycleContext";
 import { getKpis, getKpiReports, getDepartments, createKpiReport, updateKpiReport } from "@/lib/db";
 import { storage } from "@/lib/firebase";
-import { ref as storageRef, uploadBytesResumable, getDownloadURL } from "firebase/storage";
+import { ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
 import type { KPI, KPIReport, Department, AuditAttachment } from "@/lib/types";
 import { Printer, Loader2, CheckCircle, AlertCircle, RefreshCw, Pencil, Upload, FileText, ExternalLink, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -46,7 +46,9 @@ export default function KpiReportsPage() {
   const [err,         setErr]         = useState("");
   const [form,        setForm]        = useState({ kpiId:"", reportMonth:"", value:"", attachments: [] as AuditAttachment[] });
   const [editValue,   setEditValue]   = useState("");
+  const [editAttachments, setEditAttachments] = useState<AuditAttachment[]>([]);
   const fileInputRef  = useRef<HTMLInputElement>(null);
+  const editFileInputRef = useRef<HTMLInputElement>(null);
   const tempIdRef     = useRef<string>(`new_${Date.now()}`);
 
   function formatBytes(b: number) {
@@ -56,23 +58,37 @@ export default function KpiReportsPage() {
     return `${(b / 1048576).toFixed(1)} MB`;
   }
 
-  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    if (!e.target.files?.[0]) return;
-    const file = e.target.files[0];
+  async function uploadAttachment(file: File, ownerId: string, onProgress: (progress: number) => void) {
+    const path = `kpiReports/${ownerId}/${Date.now()}_${file.name}`;
+    const sRef = storageRef(storage, path);
+    const task = uploadBytesResumable(sRef, file);
+    await new Promise<void>((resolve, reject) => {
+      task.on("state_changed", snap => onProgress(Math.round((snap.bytesTransferred / snap.totalBytes) * 100)), reject, resolve);
+    });
+    const url = await getDownloadURL(task.snapshot.ref);
+    return { name: file.name, url, size: file.size, uploadedAt: new Date().toISOString() } as AuditAttachment;
+  }
+
+  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>, mode: "new" | "edit") {
+    const files = Array.from(e.target.files ?? []);
+    const ownerId = mode === "edit" ? editReport?.id : tempIdRef.current;
+    if (!files.length || !ownerId) return;
     setUploading(true); setUploadPct(0);
     try {
-      const path = `kpiReports/${tempIdRef.current}/${Date.now()}_${file.name}`;
-      const sRef = storageRef(storage, path);
-      const task = uploadBytesResumable(sRef, file);
-      await new Promise<void>((resolve, reject) => {
-        task.on("state_changed", snap => setUploadPct(Math.round((snap.bytesTransferred / snap.totalBytes) * 100)), reject, resolve);
-      });
-      const url = await getDownloadURL(task.snapshot.ref);
-      const att: AuditAttachment = { name: file.name, url, size: file.size, uploadedAt: new Date().toISOString() };
-      setForm(f => ({ ...f, attachments: [...f.attachments, att] }));
+      for (const [index, file] of files.entries()) {
+        const att = await uploadAttachment(file, ownerId, progress => {
+          setUploadPct(Math.round(((index + progress / 100) / files.length) * 100));
+        });
+        if (mode === "edit") setEditAttachments(current => [...current, att]);
+        else setForm(f => ({ ...f, attachments: [...f.attachments, att] }));
+      }
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "Upload failed");
     } finally {
       setUploading(false); setUploadPct(0);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+      if (mode === "edit") {
+        if (editFileInputRef.current) editFileInputRef.current.value = "";
+      } else if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
 
@@ -135,9 +151,18 @@ export default function KpiReportsPage() {
     if (!editReport || !editValue) return;
     setSaving(true);
     try {
-      await updateKpiReport(editReport.id, { value: Number(editValue) });
+      const removedAttachments = (editReport.attachments ?? []).filter(
+        oldAttachment => !editAttachments.some(currentAttachment => currentAttachment.url === oldAttachment.url),
+      );
+      await updateKpiReport(editReport.id, { value: Number(editValue), attachments: editAttachments });
+      await Promise.all(removedAttachments.map(async attachment => {
+        try { await deleteObject(storageRef(storage, attachment.url)); } catch { /* legacy/external URLs may not be deletable */ }
+      }));
       setEditReport(null);
+      setEditAttachments([]);
       fetchData();
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "Failed");
     } finally { setSaving(false); }
   }
 
@@ -210,7 +235,7 @@ export default function KpiReportsPage() {
                             {r ? (
                               <button
                                 title={`${r.value} ${kpi.unit} (คลิกเพื่อแก้ไข)`}
-                                onClick={() => { setEditReport(r); setEditValue(String(r.value)); }}
+                                onClick={() => { setEditReport(r); setEditValue(String(r.value)); setEditAttachments(r.attachments ?? []); setErr(""); }}
                                 className="group relative inline-flex items-center justify-center w-8 h-6 rounded hover:bg-slate-100 transition-colors">
                                 <span className="group-hover:opacity-0 transition-opacity">{statusCell(r, mi, selectedYear?.year)}</span>
                                 <Pencil className="h-3 w-3 text-slate-400 absolute opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -306,8 +331,8 @@ export default function KpiReportsPage() {
                   ))}
                 </div>
               )}
-              <input ref={fileInputRef} type="file" className="hidden"
-                accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.doc,.docx" onChange={handleFileUpload} />
+              <input ref={fileInputRef} type="file" multiple className="hidden"
+                accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.doc,.docx" onChange={e=>handleFileUpload(e, "new")} />
               <Button type="button" variant="outline" size="sm" disabled={uploading}
                 onClick={() => fileInputRef.current?.click()}
                 className="w-full h-8 text-xs mt-1.5 gap-2 border-dashed border-slate-300 hover:border-blue-400 hover:text-blue-600">
@@ -326,8 +351,8 @@ export default function KpiReportsPage() {
       </Dialog>
 
       {/* Edit Report Dialog */}
-      <Dialog open={!!editReport} onOpenChange={v=>!v && setEditReport(null)}>
-        <DialogContent className="max-w-sm">
+      <Dialog open={!!editReport} onOpenChange={v=>{ if (!v) { setEditReport(null); setEditAttachments([]); setErr(""); } }}>
+        <DialogContent className="min-w-0 sm:max-w-[640px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><Pencil className="h-5 w-5 text-blue-600"/>Edit Report</DialogTitle>
           </DialogHeader>
@@ -340,25 +365,38 @@ export default function KpiReportsPage() {
               <Label className="text-xs">Value *</Label>
               <Input type="number" value={editValue} onChange={e=>setEditValue(e.target.value)} className="mt-1 h-9 text-sm" autoFocus />
             </div>
-            {editReport?.attachments && editReport.attachments.length > 0 && (
-              <div>
-                <p className="text-[10px] font-semibold text-slate-400 uppercase mb-1.5">Attachments</p>
+            <div>
+              <p className="text-[10px] font-semibold text-slate-400 uppercase mb-1.5">Attachments <span className="normal-case font-normal">(optional)</span></p>
+              {editAttachments.length > 0 && (
                 <div className="space-y-1">
-                  {editReport.attachments.map((att, i) => (
-                    <a key={i} href={att.url} target="_blank" rel="noopener noreferrer"
-                      className="flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-blue-100 bg-blue-50 hover:bg-blue-100 transition-colors">
+                  {editAttachments.map((att, i) => (
+                    <div key={`${att.url}-${i}`} className="flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-blue-100 bg-blue-50 group">
                       <FileText className="h-3.5 w-3.5 text-blue-600 shrink-0" />
-                      <span className="text-xs text-blue-700 truncate flex-1">{att.name}</span>
-                      <ExternalLink className="h-3 w-3 text-blue-400 shrink-0" />
-                    </a>
+                      <a href={att.url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-700 truncate flex-1 hover:underline">{att.name}</a>
+                      {att.size > 0 && <span className="text-[10px] text-slate-400 shrink-0">{formatBytes(att.size)}</span>}
+                      <button type="button" aria-label={`Remove ${att.name}`} onClick={() => setEditAttachments(current => current.filter((_, index) => index !== i))}
+                        className="text-red-400 hover:text-red-600 shrink-0">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   ))}
                 </div>
-              </div>
-            )}
+              )}
+              <input ref={editFileInputRef} type="file" multiple className="hidden"
+                accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.doc,.docx" onChange={e=>handleFileUpload(e, "edit")} />
+              <Button type="button" variant="outline" size="sm" disabled={uploading}
+                onClick={() => editFileInputRef.current?.click()}
+                className="w-full h-8 text-xs mt-1.5 gap-2 border-dashed border-slate-300 hover:border-blue-400 hover:text-blue-600">
+                {uploading
+                  ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Uploading... {uploadPct}%</>
+                  : <><Upload className="h-3.5 w-3.5" />Attach Files (max 20 MB each)</>}
+              </Button>
+            </div>
+            {err && <p className="text-sm text-red-500 flex items-center gap-1"><AlertCircle className="h-4 w-4"/>{err}</p>}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={()=>setEditReport(null)}>Cancel</Button>
-            <Button onClick={handleEditSave} disabled={saving || !editValue}>
+            <Button variant="outline" onClick={()=>{ setEditReport(null); setEditAttachments([]); setErr(""); }}>Cancel</Button>
+            <Button onClick={handleEditSave} disabled={saving || uploading || !editValue}>
               {saving?<Loader2 className="h-4 w-4 animate-spin mr-1"/>:null}Save Changes
             </Button>
           </DialogFooter>
