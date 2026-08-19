@@ -93,6 +93,15 @@ export default function AuditorsPage() {
     return `${(b / 1048576).toFixed(1)} MB`;
   }
 
+  function getUploadErrorMessage(error: unknown) {
+    const code = error && typeof error === "object" && "code" in error
+      ? String((error as { code: unknown }).code)
+      : "";
+    return code
+      ? `อัปโหลดไฟล์ไม่สำเร็จ (${code}) กรุณาตรวจสอบ Firebase Storage Rules`
+      : "อัปโหลดไฟล์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง";
+  }
+
   function openEdit(a: AuditorProfile) {
     setSelected(null);
     const to9001 = a.iso9001Certs?.length
@@ -141,13 +150,6 @@ export default function AuditorsPage() {
   async function handleCertUpload(certType: "9001" | "45001", e: React.ChangeEvent<HTMLInputElement>) {
     if (!e.target.files?.length || !editing) return;
     const files = Array.from(e.target.files);
-    const maxFileSize = 20 * 1024 * 1024;
-    const tooLarge = files.find(file => file.size > maxFileSize);
-    if (tooLarge) {
-      setUploadError(`ไฟล์ ${tooLarge.name} มีขนาดเกิน 20 MB`);
-      e.target.value = "";
-      return;
-    }
 
     const is9001 = certType === "9001";
     if (is9001) { setCert9001Up(true); setCert9001Pct(0); } else { setCert45001Up(true); setCert45001Pct(0); }
@@ -180,8 +182,8 @@ export default function AuditorsPage() {
       setEditForm(f => is9001
         ? { ...f, iso9001Certs:  [...f.iso9001Certs,  ...uploaded] }
         : { ...f, iso45001Certs: [...f.iso45001Certs, ...uploaded] });
-    } catch {
-      setUploadError("อัปโหลดไฟล์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
+    } catch (error) {
+      setUploadError(getUploadErrorMessage(error));
     } finally {
       if (is9001) { setCert9001Up(false); setCert9001Pct(0); if (cert9001Ref.current) cert9001Ref.current.value = ""; }
       else         { setCert45001Up(false); setCert45001Pct(0); if (cert45001Ref.current) cert45001Ref.current.value = ""; }
@@ -191,13 +193,6 @@ export default function AuditorsPage() {
   async function handleAuditorFilesUpload(category: "internal" | "external", e: React.ChangeEvent<HTMLInputElement>) {
     if (!e.target.files?.length || !editing) return;
     const files = Array.from(e.target.files);
-    const maxFileSize = 20 * 1024 * 1024;
-    const tooLarge = files.find(file => file.size > maxFileSize);
-    if (tooLarge) {
-      setUploadError(`ไฟล์ ${tooLarge.name} มีขนาดเกิน 20 MB`);
-      e.target.value = "";
-      return;
-    }
 
     setUploadError(null);
     setUploadingCategory(category);
@@ -227,8 +222,8 @@ export default function AuditorsPage() {
       setEditForm(form => category === "internal"
         ? { ...form, internalAttachments: [...form.internalAttachments, ...uploaded] }
         : { ...form, externalAttachments: [...form.externalAttachments, ...uploaded] });
-    } catch {
-      setUploadError("อัปโหลดไฟล์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
+    } catch (error) {
+      setUploadError(getUploadErrorMessage(error));
     } finally {
       setUploadingCategory(null);
       setUploadProgress(0);
@@ -561,7 +556,7 @@ export default function AuditorsPage() {
               <Button type="button" variant="outline" size="sm" disabled={cert9001Up || cert45001Up || uploadingCategory !== null}
                 onClick={() => cert9001Ref.current?.click()}
                 className="w-full h-8 text-xs mt-1.5 gap-2 border-dashed border-slate-300 hover:border-blue-400 hover:text-blue-600">
-                {cert9001Up ? (<><Loader2 className="h-3.5 w-3.5 animate-spin" />Uploading... {cert9001Pct}%</>) : (<><Upload className="h-3.5 w-3.5" />Upload ISO 9001 Certs (multiple, max 20 MB/file)</>)}
+                {cert9001Up ? (<><Loader2 className="h-3.5 w-3.5 animate-spin" />Uploading... {cert9001Pct}%</>) : (<><Upload className="h-3.5 w-3.5" />Upload ISO 9001 Certs (multiple)</>)}
               </Button>
             </div>
 
@@ -590,7 +585,7 @@ export default function AuditorsPage() {
               <Button type="button" variant="outline" size="sm" disabled={cert9001Up || cert45001Up || uploadingCategory !== null}
                 onClick={() => cert45001Ref.current?.click()}
                 className="w-full h-8 text-xs mt-1.5 gap-2 border-dashed border-slate-300 hover:border-blue-400 hover:text-blue-600">
-                {cert45001Up ? (<><Loader2 className="h-3.5 w-3.5 animate-spin" />Uploading... {cert45001Pct}%</>) : (<><Upload className="h-3.5 w-3.5" />Upload ISO 45001 Certs (multiple, max 20 MB/file)</>)}
+                {cert45001Up ? (<><Loader2 className="h-3.5 w-3.5 animate-spin" />Uploading... {cert45001Pct}%</>) : (<><Upload className="h-3.5 w-3.5" />Upload ISO 45001 Certs (multiple)</>)}
               </Button>
             </div>
 
@@ -605,7 +600,7 @@ export default function AuditorsPage() {
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <Label className="text-xs font-semibold uppercase tracking-wide text-slate-600">{category} files</Label>
-                      <p className="mt-0.5 text-[11px] text-slate-400">เลือกได้หลายไฟล์ · ไม่เกิน 20 MB ต่อไฟล์</p>
+                      <p className="mt-0.5 text-[11px] text-slate-400">เลือกได้หลายไฟล์ · ไม่จำกัดขนาดต่อไฟล์</p>
                     </div>
                     <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-medium text-slate-500">{files.length} files</span>
                   </div>
