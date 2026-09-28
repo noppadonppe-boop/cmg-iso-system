@@ -293,7 +293,7 @@ export default function CparPage() {
 
       {/* ── Add CPAR Dialog ── */}
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
-        <DialogContent className="sm:max-w-[600px]">
+        <DialogContent className="sm:max-w-[760px]">
           <DialogHeader><DialogTitle>Add CPAR</DialogTitle></DialogHeader>
           <div className="grid gap-4 py-2 overflow-y-auto max-h-[70vh] pr-1">
             <div className="space-y-1.5">

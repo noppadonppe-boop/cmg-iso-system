@@ -15,6 +15,7 @@ import {
   UserCog, RefreshCw, Users, Clock, ShieldCheck, Ban,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { CompactStats } from "@/components/ui/compact-stats";
 
 // ── Types & constants ─────────────────────────────────────────────────────────
 type FilterType = "all" | "pending" | "approved" | "rejected";
@@ -111,8 +112,8 @@ function RoleMultiSelect({ value, onChange }: { value: UserRole[]; onChange: (v:
   );
 }
 
-// ── User card (full-size) ─────────────────────────────────────────────────────
-function UserCard({ user, departments, onUpdated }: { user: UserProfile; departments: Department[]; onUpdated: () => void }) {
+// ── Compact user table row ───────────────────────────────────────────────────
+function UserRow({ user, departments, onUpdated }: { user: UserProfile; departments: Department[]; onUpdated: () => void }) {
   const { userProfile: me } = useAuth();
   const [editing,  setEditing]  = useState(false);
   const [saving,   setSaving]   = useState(false);
@@ -154,168 +155,150 @@ function UserCard({ user, departments, onUpdated }: { user: UserProfile; departm
     setLastName(user.lastName ?? "");
   }
 
+  const department = departments.find(d => d.id === user.departmentId);
+  const displayName = `${user.firstName ?? ""} ${user.lastName ?? ""}`.trim() || "ไม่ระบุชื่อ";
+
   return (
-    <div className={cn(
-      "rounded-xl border bg-white shadow-sm transition-shadow hover:shadow-md",
-      user.status === "pending" && "border-amber-300 ring-1 ring-amber-200",
-      user.status === "rejected" && "opacity-70",
-    )}>
-      {/* Card header */}
-      <div className="flex items-start gap-4 p-5">
-        {/* Avatar */}
-        <div className="shrink-0">
-          {user.photoURL ? (
-            <img src={user.photoURL} alt=""
-              className="h-12 w-12 rounded-full object-cover ring-2 ring-slate-100" />
-          ) : (
-            <div className="h-12 w-12 rounded-full bg-blue-600 flex items-center justify-center text-white text-lg font-bold ring-2 ring-blue-100">
-              {(user.firstName?.[0] ?? user.email[0]).toUpperCase()}
+    <>
+      <tr className={cn(
+        "border-b border-slate-100 transition-colors hover:bg-slate-50/80",
+        user.status === "pending" && "bg-amber-50/40",
+        user.status === "rejected" && "opacity-70",
+      )}>
+        <td className="px-3 py-2">
+          <div className="flex min-w-[250px] items-center gap-2.5 whitespace-nowrap">
+            {user.photoURL ? (
+              <img src={user.photoURL} alt=""
+                className="h-8 w-8 shrink-0 rounded-full object-cover ring-1 ring-slate-200" />
+            ) : (
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-600 text-sm font-bold text-white ring-2 ring-blue-100">
+                {(user.firstName?.[0] ?? user.email?.[0] ?? "?").toUpperCase()}
+              </div>
+            )}
+            <div className="flex min-w-0 items-center gap-2 whitespace-nowrap">
+              <p className="max-w-[190px] truncate text-sm font-semibold text-slate-800" title={displayName}>
+                {displayName}
+                {isSelf && <span className="ml-1 text-xs font-normal text-blue-500">(คุณ)</span>}
+              </p>
+              <span className="max-w-[230px] truncate text-xs text-slate-500" title={user.email}>
+                · {user.email || "-"}
+              </span>
             </div>
-          )}
-        </div>
-
-        {/* Info */}
-        <div className="flex-1 min-w-0">
-          {!editing ? (
-            <>
-              <div className="flex items-center gap-2 flex-wrap">
-                <p className="font-semibold text-slate-800 text-base">
-                  {user.firstName} {user.lastName}
-                  {isSelf && <span className="ml-1.5 text-xs text-blue-500 font-normal">(คุณ)</span>}
-                </p>
-                <Badge className={cn("text-xs border", STATUS_LABEL[user.status]?.cls)}>
-                  {STATUS_LABEL[user.status]?.label}
-                </Badge>
-              </div>
-              <p className="text-sm text-slate-500 mt-0.5">{user.email}</p>
-              <p className="text-xs text-slate-400 mt-0.5">{user.position || <span className="italic">ไม่ระบุตำแหน่ง</span>}</p>
-              <div className="flex flex-wrap gap-1.5 mt-2">
-                {(user.roles ?? []).map(r => (
-                  <span key={r} className="rounded-md bg-blue-50 border border-blue-100 text-blue-700 px-2 py-0.5 text-xs font-medium">
-                    {r}
-                  </span>
-                ))}
-                {(!user.roles || user.roles.length === 0) && (
-                  <span className="text-xs text-slate-400 italic">ไม่มี role</span>
-                )}
-              </div>
-            </>
-          ) : (
-            /* Edit mode */
-            <div className="space-y-3 w-full">
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-xs font-medium text-slate-600 mb-1 block">ชื่อ</label>
-                  <Input value={firstName} onChange={e => setFirstName(e.target.value)}
-                    className="h-9 text-sm" placeholder="ชื่อ" />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-slate-600 mb-1 block">นามสกุล</label>
-                  <Input value={lastName} onChange={e => setLastName(e.target.value)}
-                    className="h-9 text-sm" placeholder="นามสกุล" />
-                </div>
-              </div>
-              <div>
-                <label className="text-xs font-medium text-slate-600 mb-1 block">ตำแหน่งงาน</label>
-                <Input value={position} onChange={e => setPosition(e.target.value)}
-                  className="h-9 text-sm" placeholder="เช่น Quality Engineer" />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-slate-600 mb-1 block">สิทธิ์การใช้งาน (Roles)</label>
-                <RoleMultiSelect value={roles} onChange={setRoles} />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-slate-600 mb-1 block">แผนก (Department)</label>
-                <DepartmentSelect value={deptId} departments={departments} onChange={setDeptId} />
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Meta: joined date */}
-        <div className="shrink-0 text-right hidden sm:block">
-          <p className="text-[11px] text-slate-400">สมัครเมื่อ</p>
-          <p className="text-xs text-slate-500 font-medium">
-            {user.createdAt ? new Date(user.createdAt).toLocaleDateString("th-TH") : "-"}
-          </p>
-        </div>
-      </div>
-
-      {/* Card footer — actions */}
-      <div className="flex items-center gap-2 px-5 py-3 bg-slate-50 border-t border-slate-100 rounded-b-xl flex-wrap">
+          </div>
+        </td>
+        <td className="whitespace-nowrap px-3 py-2">
+          <Badge className={cn("border px-2 py-0.5 text-[11px]", STATUS_LABEL[user.status]?.cls)}>
+            {STATUS_LABEL[user.status]?.label ?? user.status}
+          </Badge>
+        </td>
+        <td className="max-w-[190px] whitespace-nowrap px-3 py-2 text-sm text-slate-600">
+          <span className="block max-w-[190px] truncate" title={user.position || "ไม่ระบุตำแหน่ง"}>
+            {user.position || <span className="italic text-slate-400">ไม่ระบุตำแหน่ง</span>}
+          </span>
+        </td>
+        <td className="whitespace-nowrap px-3 py-2 text-sm text-slate-600">
+          {department ? (
+            <span title={department.name}>
+              <span className="mr-1 font-mono text-xs text-blue-500">{department.code}</span>
+              {department.name}
+            </span>
+          ) : <span className="italic text-slate-400">ไม่ระบุ</span>}
+        </td>
+        <td className="px-3 py-2">
+          <div className="flex max-w-[230px] items-center gap-1 overflow-hidden whitespace-nowrap">
+            {(user.roles ?? []).length > 0 ? (user.roles ?? []).map(r => (
+              <span key={r} className="shrink-0 rounded-md border border-blue-100 bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700">
+                {r}
+              </span>
+            )) : <span className="text-xs italic text-slate-400">ไม่มี role</span>}
+          </div>
+        </td>
+        <td className="whitespace-nowrap px-3 py-2 text-xs font-medium text-slate-500">
+          {user.createdAt ? new Date(user.createdAt).toLocaleDateString("th-TH") : "-"}
+        </td>
+        <td className="whitespace-nowrap px-3 py-2">
+          <div className="flex items-center justify-end gap-1">
         {user.status === "pending" && (
           <>
-            <Button size="sm" className="gap-1.5 bg-green-600 hover:bg-green-700 h-8"
+            <Button size="icon-sm" className="h-7 w-7 bg-green-600 hover:bg-green-700" aria-label="อนุมัติผู้ใช้" title="อนุมัติผู้ใช้"
               onClick={handleApprove} disabled={saving}>
               {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle className="h-3.5 w-3.5" />}
-              อนุมัติ
             </Button>
-            <Button size="sm" variant="destructive" className="gap-1.5 h-8"
+            <Button size="icon-sm" variant="destructive" className="h-7 w-7" aria-label="ปฏิเสธผู้ใช้" title="ปฏิเสธผู้ใช้"
               onClick={handleReject} disabled={saving}>
               {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <XCircle className="h-3.5 w-3.5" />}
-              ปฏิเสธ
             </Button>
-            <div className="w-px h-4 bg-slate-300" />
           </>
         )}
         {user.status === "approved" && (
           <>
-            <Button size="sm" variant="destructive" className="gap-1.5 h-8"
+            <Button size="icon-sm" variant="destructive" className="h-7 w-7" aria-label="ระงับสิทธิ์ผู้ใช้" title="ระงับสิทธิ์ผู้ใช้"
               onClick={handleReject} disabled={saving}>
               {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <XCircle className="h-3.5 w-3.5" />}
-              ระงับสิทธิ์
             </Button>
-            <div className="w-px h-4 bg-slate-300" />
           </>
         )}
         {user.status === "rejected" && (
           <>
-            <Button size="sm" className="gap-1.5 bg-green-600 hover:bg-green-700 h-8"
+            <Button size="icon-sm" className="h-7 w-7 bg-green-600 hover:bg-green-700" aria-label="อนุมัติผู้ใช้อีกครั้ง" title="อนุมัติผู้ใช้อีกครั้ง"
               onClick={handleApprove} disabled={saving}>
               {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle className="h-3.5 w-3.5" />}
-              อนุมัติใหม่
             </Button>
-            <div className="w-px h-4 bg-slate-300" />
           </>
         )}
         {!editing ? (
-          <Button size="sm" variant="outline" className="gap-1.5 h-8"
+          <Button size="icon-sm" variant="outline" className="h-7 w-7" aria-label="แก้ไขข้อมูลผู้ใช้" title="แก้ไขข้อมูลผู้ใช้"
             onClick={() => setEditing(true)}>
             <UserCog className="h-3.5 w-3.5" />
-            แก้ไขข้อมูล
           </Button>
-        ) : (
-          <>
-            <Button size="sm" className="gap-1.5 h-8 bg-blue-600 hover:bg-blue-700"
-              onClick={handleSave} disabled={saving}>
-              {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-              บันทึก
-            </Button>
-            <Button size="sm" variant="outline" className="h-8"
-              onClick={handleCancel} disabled={saving}>
-              ยกเลิก
-            </Button>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
+        ) : null}
+          </div>
+        </td>
+      </tr>
 
-// ── Stat card ─────────────────────────────────────────────────────────────────
-function StatCard({ icon: Icon, label, value, cls }: {
-  icon: React.ElementType; label: string; value: number; cls: string;
-}) {
-  return (
-    <div className="flex items-center gap-3 rounded-xl bg-white border border-slate-200 px-5 py-4 shadow-sm">
-      <div className={cn("flex h-10 w-10 items-center justify-center rounded-lg", cls)}>
-        <Icon className="h-5 w-5" />
-      </div>
-      <div>
-        <p className="text-2xl font-bold text-slate-800">{value}</p>
-        <p className="text-xs text-slate-500">{label}</p>
-      </div>
-    </div>
+      {editing && (
+        <tr className="border-b border-blue-100 bg-blue-50/40">
+          <td colSpan={7} className="px-3 py-3">
+            <div className="grid grid-cols-1 items-end gap-2 md:grid-cols-2 xl:grid-cols-6">
+              <div>
+                <label className="mb-1 block text-[11px] font-medium text-slate-600">ชื่อ</label>
+                <Input value={firstName} onChange={e => setFirstName(e.target.value)}
+                  className="h-8 text-sm" placeholder="ชื่อ" />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] font-medium text-slate-600">นามสกุล</label>
+                <Input value={lastName} onChange={e => setLastName(e.target.value)}
+                  className="h-8 text-sm" placeholder="นามสกุล" />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] font-medium text-slate-600">ตำแหน่งงาน</label>
+                <Input value={position} onChange={e => setPosition(e.target.value)}
+                  className="h-8 text-sm" placeholder="เช่น Quality Engineer" />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] font-medium text-slate-600">สิทธิ์การใช้งาน</label>
+                <RoleMultiSelect value={roles} onChange={setRoles} />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] font-medium text-slate-600">แผนก</label>
+                <DepartmentSelect value={deptId} departments={departments} onChange={setDeptId} />
+              </div>
+              <div className="flex gap-2">
+                <Button size="sm" className="h-8 bg-blue-600 hover:bg-blue-700"
+                  onClick={handleSave} disabled={saving}>
+                  {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  บันทึก
+                </Button>
+                <Button size="sm" variant="outline" className="h-8"
+                  onClick={handleCancel} disabled={saving}>
+                  ยกเลิก
+                </Button>
+              </div>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 
@@ -375,15 +358,14 @@ export default function UserManagementPage() {
 
   return (
     <AppLayout title="จัดการผู้ใช้งาน">
-      <div className="space-y-6 max-w-5xl mx-auto">
+      <div className="mx-auto max-w-[1400px] space-y-6">
 
-        {/* ── Stat cards ── */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <StatCard icon={Users}       label="ผู้ใช้ทั้งหมด" value={counts.all}      cls="bg-blue-50 text-blue-600" />
-          <StatCard icon={Clock}       label="รออนุมัติ"     value={counts.pending}  cls="bg-amber-50 text-amber-600" />
-          <StatCard icon={ShieldCheck} label="อนุมัติแล้ว"   value={counts.approved} cls="bg-green-50 text-green-600" />
-          <StatCard icon={Ban}         label="ถูกปฏิเสธ"     value={counts.rejected} cls="bg-red-50 text-red-600" />
-        </div>
+        <CompactStats items={[
+          { icon: Users, label: "ผู้ใช้ทั้งหมด", value: counts.all, tone: "blue" },
+          { icon: Clock, label: "รออนุมัติ", value: counts.pending, tone: "amber" },
+          { icon: ShieldCheck, label: "อนุมัติแล้ว", value: counts.approved, tone: "green" },
+          { icon: Ban, label: "ถูกปฏิเสธ", value: counts.rejected, tone: "red" },
+        ]} />
 
         {/* ── Toolbar ── */}
         <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
@@ -440,16 +422,38 @@ export default function UserManagementPage() {
             </p>
           </div>
         ) : (
-          <div className="space-y-3">
+          <div>
             {counts.pending > 0 && filter !== "approved" && filter !== "rejected" && (
-              <p className="text-sm font-medium text-amber-700 flex items-center gap-1.5">
+              <p className="mb-2 flex items-center gap-1.5 text-sm font-medium text-amber-700">
                 <Clock className="h-4 w-4" />
                 มี {counts.pending} บัญชีรอการอนุมัติ
               </p>
             )}
-            {filtered.map(u => (
-              <UserCard key={u.uid} user={u} departments={departments} onUpdated={load} />
-            ))}
+            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[1120px] text-left">
+                  <thead className="border-b border-slate-200 bg-slate-50">
+                    <tr className="whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                      <th className="px-3 py-2.5">ผู้ใช้งาน</th>
+                      <th className="px-3 py-2.5">สถานะ</th>
+                      <th className="px-3 py-2.5">ตำแหน่ง</th>
+                      <th className="px-3 py-2.5">แผนก</th>
+                      <th className="px-3 py-2.5">Roles</th>
+                      <th className="px-3 py-2.5">สมัครเมื่อ</th>
+                      <th className="px-3 py-2.5 text-right">จัดการ</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map(u => (
+                      <UserRow key={u.uid} user={u} departments={departments} onUpdated={load} />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="border-t border-slate-100 bg-slate-50/70 px-3 py-2 text-xs text-slate-400">
+                แสดง {filtered.length} จาก {users.length} ผู้ใช้งาน
+              </div>
+            </div>
           </div>
         )}
       </div>

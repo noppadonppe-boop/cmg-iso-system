@@ -12,15 +12,17 @@ import {
   FileText, Search, Plus, Printer, ExternalLink, RefreshCw, Loader2,
   BookOpen, ClipboardList, FileCheck, Globe, Archive,
   AlertCircle, CheckCircle, Clock, Eye, Link2,
-  Pencil, Trash2, Upload,
+  Pencil, Trash2, Upload, History, Send, ShieldCheck, Check, X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
-import { getDocuments, getDepartments, createDocument, updateDocument, deleteDocument } from "@/lib/db";
+import { getDocuments, getDepartments, createDocument, updateDocument, deleteDocument, getDocumentRevisionRequests, createDocumentRevisionRequest, decideDocumentRevisionRequest } from "@/lib/db";
 import { listAllUsers } from "@/lib/authService";
 import { storage } from "@/lib/firebase";
 import { ref as storageRef, uploadBytesResumable, getDownloadURL } from "firebase/storage";
-import type { Document, Department, UserProfile, AuditAttachment } from "@/lib/types";
+import { useAuth } from "@/context/AuthContext";
+import type { Document, DocumentRevisionRequest, DocumentVersion, Department, UserProfile, AuditAttachment } from "@/lib/types";
+import { CompactStats } from "@/components/ui/compact-stats";
 
 const CATEGORIES = [
   { key: "POLICY",           label: "Policy",           short: "POL", icon: BookOpen,     color: "bg-purple-100 text-purple-700 border-purple-200" },
@@ -40,6 +42,15 @@ const STATUSES = [
 function getCatMeta(k: string) { return CATEGORIES.find(c => c.key === k) ?? CATEGORIES[1]; }
 function getStatMeta(k: string) { return STATUSES.find(s => s.key === k) ?? STATUSES[0]; }
 function isOverdue(d: string) { return new Date(d) < new Date(); }
+function nextRevision(revision: string) {
+  const match = revision.match(/^Rev(?:ision)?[.\s-]*(\d+)$/i);
+  return match ? `Rev.${Number(match[1]) + 1}` : "Rev.1";
+}
+function displayDate(value?: string) {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "—" : format(date, "d MMM yyyy");
+}
 
 const deptColors: Record<string, string> = {
   MKT:"bg-pink-100 text-pink-700",  LOG:"bg-amber-100 text-amber-700",
@@ -48,7 +59,10 @@ const deptColors: Record<string, string> = {
 };
 
 export default function DocumentsPage() {
+  const { userProfile, hasAnyRole } = useAuth();
+  const canApproveDar = hasAnyRole(["QMR", "MasterAdmin"]);
   const [docs,       setDocs]       = useState<Document[]>([]);
+  const [darRequests,setDarRequests]= useState<DocumentRevisionRequest[]>([]);
   const [depts,      setDepts]      = useState<Department[]>([]);
   const [users,      setUsers]      = useState<UserProfile[]>([]);
   const [loading,    setLoading]    = useState(true);
@@ -64,6 +78,20 @@ export default function DocumentsPage() {
   const [uploading,  setUploading]  = useState(false);
   const [uploadPct,  setUploadPct]  = useState(0);
   const [formErr,    setFormErr]    = useState("");
+  const [darOpen,    setDarOpen]    = useState(false);
+  const [darCategory,setDarCategory]= useState("");
+  const [darDocumentId,setDarDocumentId]=useState("");
+  const [darForm,    setDarForm]    = useState({ docNo:"", title:"", category:"PROCEDURE", departmentId:"", ownerId:"", revision:"Rev.1", status:"ACTIVE", issuedDate:"", nextReviewDate:"", description:"", attachments: [] as AuditAttachment[] });
+  const [darChangeSummary,setDarChangeSummary]=useState("");
+  const [darEffectiveDate,setDarEffectiveDate]=useState("");
+  const [darErr,     setDarErr]     = useState("");
+  const [darSaving,  setDarSaving]  = useState(false);
+  const [qmrOpen,    setQmrOpen]    = useState(false);
+  const [qmrErr,     setQmrErr]     = useState("");
+  const [qmrSavingId,setQmrSavingId]=useState("");
+  const [qmrNotes,   setQmrNotes]   = useState<Record<string, string>>({});
+  const [historyOpen,setHistoryOpen]=useState(false);
+  const [historyDoc, setHistoryDoc] = useState<Document | null>(null);
   const [form, setForm] = useState({
     docNo:"", title:"", category:"PROCEDURE", departmentId:"", ownerId:"",
     revision:"Rev.1", status:"DRAFT", issuedDate:"", nextReviewDate:"", description:"",
@@ -71,6 +99,7 @@ export default function DocumentsPage() {
   });
   const printRef   = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const darFileInputRef = useRef<HTMLInputElement>(null);
   const tempDocIdRef = useRef<string>(`new_${Date.now()}`);
 
   function formatBytes(b: number) {
@@ -85,8 +114,10 @@ export default function DocumentsPage() {
   const fetchDocs = useCallback(async () => {
     setLoading(true);
     try {
-      const [d, de, u] = await Promise.all([getDocuments(), getDepartments(), listAllUsers()]);
-      setDocs(d); setDepts(de); setUsers(u);
+      const [d, de, u, requests] = await Promise.all([getDocuments(), getDepartments(), listAllUsers(), getDocumentRevisionRequests()]);
+      setDocs(d); setDepts(de); setUsers(u); setDarRequests(requests);
+      setSelected(current => current ? d.find(item => item.id === current.id) ?? null : null);
+      setHistoryDoc(current => current ? d.find(item => item.id === current.id) ?? null : null);
     } finally { setLoading(false); }
   }, []);
 
@@ -196,21 +227,117 @@ export default function DocumentsPage() {
     finally { setSaving(false); }
   }
 
+  function openDar() {
+    setDarCategory(""); setDarDocumentId(""); setDarChangeSummary("");
+    setDarEffectiveDate(""); setDarErr(""); setDarForm({ ...BLANK_FORM, status: "ACTIVE" });
+    setDarOpen(true);
+  }
+
+  function selectDarDocument(docId: string) {
+    const source = docs.find(d => d.id === docId);
+    setDarDocumentId(docId); setDarErr(""); setDarChangeSummary("");
+    setDarEffectiveDate(format(new Date(), "yyyy-MM-dd"));
+    if (!source) return;
+    tempDocIdRef.current = source.id;
+    setDarForm({
+      docNo: source.docNo, title: source.title, category: source.category,
+      departmentId: source.departmentId, ownerId: source.ownerId,
+      revision: nextRevision(source.revision), status: source.status,
+      issuedDate: "", nextReviewDate: source.nextReviewDate?.substring(0, 10) ?? "",
+      description: source.description, attachments: source.attachments ?? [],
+    });
+  }
+
+  async function handleDarFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    if (!e.target.files?.[0]) return;
+    const file = e.target.files[0];
+    setUploading(true); setUploadPct(0);
+    try {
+      const sourceId = darDocumentId || tempDocIdRef.current;
+      const path = `documents/${sourceId}/${Date.now()}_${file.name}`;
+      const task = uploadBytesResumable(storageRef(storage, path), file);
+      await new Promise<void>((resolve, reject) => {
+        task.on("state_changed", snap => setUploadPct(Math.round((snap.bytesTransferred / snap.totalBytes) * 100)), reject, resolve);
+      });
+      const url = await getDownloadURL(task.snapshot.ref);
+      setDarForm(f => ({ ...f, attachments: [...f.attachments, { name: file.name, url, size: file.size, uploadedAt: new Date().toISOString() }] }));
+    } catch (e: unknown) {
+      setDarErr(e instanceof Error ? e.message : "อัปโหลดไฟล์ไม่สำเร็จ");
+    } finally {
+      setUploading(false); setUploadPct(0);
+      if (darFileInputRef.current) darFileInputRef.current.value = "";
+    }
+  }
+
+  async function handleSubmitDar() {
+    const source = docs.find(d => d.id === darDocumentId);
+    if (!source) { setDarErr("กรุณาเลือกเอกสาร"); return; }
+    if (!darForm.title || !darForm.departmentId || !darForm.ownerId || !darForm.revision || !darEffectiveDate || !darChangeSummary.trim()) {
+      setDarErr("กรุณากรอกชื่อเอกสาร แผนก ผู้รับผิดชอบ Rev วันที่เริ่มใช้ และรายละเอียดการแก้ไข"); return;
+    }
+    if (darForm.revision.trim() === source.revision.trim()) { setDarErr("Rev ใหม่ต้องแตกต่างจาก Rev ปัจจุบัน"); return; }
+    setDarSaving(true); setDarErr("");
+    const ownerUser = users.find(u => u.uid === darForm.ownerId);
+    const department = depts.find(d => d.id === darForm.departmentId);
+    const requestorName = `${userProfile?.firstName ?? ""} ${userProfile?.lastName ?? ""}`.trim() || userProfile?.email || "ผู้ใช้งาน";
+    try {
+      await createDocumentRevisionRequest({
+        documentId: source.id, docNo: source.docNo, title: source.title, category: source.category,
+        previousRevision: source.revision, previousDocumentStatus: source.status,
+        changeSummary: darChangeSummary.trim(), effectiveDate: darEffectiveDate,
+        requestorId: userProfile?.uid ?? "", requestorName,
+        proposal: {
+          docNo: source.docNo, title: darForm.title.trim(), category: source.category,
+          departmentId: darForm.departmentId, ...(department ? { department } : {}),
+          ownerId: darForm.ownerId,
+          ...(ownerUser ? { owner: { id: ownerUser.uid, name: `${ownerUser.firstName} ${ownerUser.lastName}`.trim(), email: ownerUser.email, role: ownerUser.roles?.[0] ?? "", departmentId: ownerUser.departmentId ?? "" } } : {}),
+          revision: darForm.revision.trim(), issuedDate: "", nextReviewDate: darForm.nextReviewDate || source.nextReviewDate,
+          fileUrl: source.fileUrl ?? null, description: darForm.description.trim(),
+          relatedCparId: source.relatedCparId ?? null, relatedMocId: source.relatedMocId ?? null,
+          attachments: darForm.attachments,
+        },
+      });
+      setDarOpen(false); setDarCategory(""); setDarDocumentId("");
+      await fetchDocs();
+    } catch (e: unknown) { setDarErr(e instanceof Error ? e.message : "ส่งคำขอ DAR ไม่สำเร็จ"); }
+    finally { setDarSaving(false); }
+  }
+
+  async function handleDarDecision(request: DocumentRevisionRequest, decision: "APPROVED" | "REJECTED") {
+    if (!userProfile) return;
+    if (decision === "REJECTED" && !(qmrNotes[request.id] ?? "").trim()) {
+      setQmrErr("กรุณาระบุเหตุผลเมื่อไม่อนุมัติคำขอ DAR"); return;
+    }
+    setQmrSavingId(request.id); setQmrErr("");
+    const reviewerName = `${userProfile.firstName} ${userProfile.lastName}`.trim() || userProfile.email;
+    try {
+      await decideDocumentRevisionRequest(request.id, decision, { id: userProfile.uid, name: reviewerName }, qmrNotes[request.id] ?? "");
+      await fetchDocs();
+    } catch (e: unknown) { setQmrErr(e instanceof Error ? e.message : "บันทึกผลการพิจารณาไม่สำเร็จ"); }
+    finally { setQmrSavingId(""); }
+  }
+
+  function openVersionHistory(doc: Document) {
+    setHistoryDoc(doc); setHistoryOpen(true);
+  }
+
+  const pendingDarCount = darRequests.filter(r => r.status === "PENDING").length;
+  const visibleDarRequests = canApproveDar ? darRequests : darRequests.filter(r => r.requestorId === userProfile?.uid);
+  const categoryDocuments = docs.filter(d => d.category === darCategory && d.status !== "OBSOLETE" && !d.pendingRevisionRequestId);
+  const orderedVersions: (DocumentVersion | (Document & { archivedAt?: string }))[] = historyDoc
+    ? [{ ...historyDoc, archivedAt: "" }, ...(historyDoc.versions ?? []).slice().reverse()]
+    : [];
+
   return (
     <AppLayout title="Document Control">
       <style>{`@media print { body * { visibility:hidden; } #doc-print-area, #doc-print-area * { visibility:visible; } #doc-print-area { position:absolute;inset:0;padding:24px; } .no-print { display:none !important; } }`}</style>
 
-      {/* Stat cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-4 mb-6 no-print">
-        {[["Total Documents", total, "text-slate-700", "bg-slate-50"], ["Active", active, "text-green-700", "bg-green-50"], ["Under Review", underReview, "text-amber-700", "bg-amber-50"], ["Overdue Review", overdueRev, "text-red-700", "bg-red-50"]].map(([lbl, val, clr, bg]) => (
-          <Card key={lbl as string} className={cn("border border-slate-200", bg as string)}>
-            <CardContent className="p-2 md:p-4 text-center md:text-left overflow-hidden">
-              <p className="text-[10px] md:text-xs font-medium text-slate-500 mb-0.5 md:mb-1 truncate">{lbl as string}</p>
-              <p className={cn("text-xl md:text-3xl font-bold truncate", clr as string)}>{val as number}</p>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      <CompactStats className="mb-5 no-print" items={[
+        { label: "Total Documents", value: total },
+        { label: "Active", value: active, tone: "green" },
+        { label: "Under Review", value: underReview, tone: "amber" },
+        { label: "Overdue Review", value: overdueRev, tone: "red" },
+      ]} />
 
       {/* Category tabs */}
       <div className="flex flex-wrap gap-2 mb-5 no-print">
@@ -247,6 +374,8 @@ export default function DocumentsPage() {
         </Select>
         <Button variant="outline" size="sm" onClick={fetchDocs} className="h-9"><RefreshCw className="h-4 w-4" /></Button>
         <Button variant="outline" size="sm" onClick={()=>window.print()} className="h-9"><Printer className="h-4 w-4 mr-1.5" />Print</Button>
+        <Button variant="outline" size="sm" onClick={openDar} className="h-9 border-indigo-200 text-indigo-700 hover:bg-indigo-50"><Send className="h-4 w-4 mr-1.5" />คำขอ DAR แก้ไขเอกสาร</Button>
+        <Button variant="outline" size="sm" onClick={()=>{setQmrOpen(true);setQmrErr("");}} className="h-9 border-amber-200 text-amber-800 hover:bg-amber-50"><ShieldCheck className="h-4 w-4 mr-1.5" />{canApproveDar ? `ตรวจ DAR${pendingDarCount > 0 ? ` (${pendingDarCount})` : ""}` : "ติดตามสถานะ DAR"}</Button>
         <Button size="sm" onClick={openNew} className="h-9"><Plus className="h-4 w-4 mr-1.5" />Add Document</Button>
       </div>
 
@@ -336,6 +465,11 @@ export default function DocumentsPage() {
                     {selected.relatedMocId && <div className="flex items-center gap-2 text-xs text-blue-700 bg-blue-50 px-2.5 py-1.5 rounded-md border border-blue-200"><Link2 className="h-3.5 w-3.5" />MOC: <span className="font-mono font-semibold">{selected.relatedMocId}</span></div>}
                   </div>
                 )}
+                {(selected.versions?.length ?? 0) > 0 && (
+                  <Button size="sm" variant="outline" className="w-full h-8 text-xs" onClick={() => openVersionHistory(selected)}>
+                    <History className="h-3.5 w-3.5 mr-1.5" />ประวัติเอกสาร ({selected.versions?.length} Rev)
+                  </Button>
+                )}
                 {/* Attachments in detail panel */}
                 {(selected.attachments && selected.attachments.length > 0) && (
                   <div>
@@ -375,9 +509,135 @@ export default function DocumentsPage() {
         )}
       </div>
 
+      {/* DAR revision request: category first, then the current controlled document */}
+      <Dialog open={darOpen} onOpenChange={v => { if (!v) { setDarOpen(false); setDarErr(""); } }}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><Send className="h-4 w-4 text-indigo-600" />คำขอ DAR แก้ไขเอกสาร</DialogTitle></DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label className="text-xs">1. เลือก Category *</Label>
+                <Select value={darCategory} onValueChange={v => { setDarCategory(v); setDarDocumentId(""); setDarErr(""); }}>
+                  <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue placeholder="เลือกประเภทเอกสารก่อน" /></SelectTrigger>
+                  <SelectContent>{CATEGORIES.map(c=><SelectItem key={c.key} value={c.key}>{c.short} — {c.label}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div><Label className="text-xs">2. เลือกรายการเอกสาร *</Label>
+                <Select value={darDocumentId} onValueChange={selectDarDocument} disabled={!darCategory}>
+                  <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue placeholder={darCategory ? "เลือกเอกสารที่ต้องการแก้ไข" : "เลือก Category ก่อน"} /></SelectTrigger>
+                  <SelectContent>{categoryDocuments.map(d=><SelectItem key={d.id} value={d.id}>{d.docNo} — {d.title} ({d.revision})</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+            </div>
+            {!darDocumentId && darCategory && categoryDocuments.length === 0 && <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-3">ไม่พบเอกสารในหมวดนี้ที่พร้อมส่งคำขอ (เอกสารที่รออนุมัติหรือยกเลิกแล้วจะไม่แสดง)</p>}
+            {darDocumentId && (() => {
+              const source = docs.find(d => d.id === darDocumentId);
+              if (!source) return null;
+              return <>
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5">
+                  <div><p className="text-xs font-semibold text-blue-900">{source.docNo} · {source.title}</p><p className="text-[11px] text-blue-700 mt-0.5">Rev ปัจจุบัน {source.revision} จะยังคงใช้อยู่จนกว่า QMR จะอนุมัติ</p></div>
+                  <Badge className="border-0 bg-blue-100 text-blue-800">Rev ใหม่: {darForm.revision || "—"}</Badge>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div><Label className="text-xs">Doc No</Label><Input value={source.docNo} readOnly className="mt-1 h-9 text-sm font-mono bg-slate-50" /></div>
+                  <div><Label className="text-xs">Category</Label><Input value={getCatMeta(source.category).label} readOnly className="mt-1 h-9 text-sm bg-slate-50" /></div>
+                </div>
+                <div><Label className="text-xs">ชื่อเอกสาร *</Label><Input value={darForm.title} onChange={e=>setDarForm(f=>({...f,title:e.target.value}))} className="mt-1 h-9 text-sm" /></div>
+                <div><Label className="text-xs">รายละเอียดเอกสาร</Label><Textarea value={darForm.description} onChange={e=>setDarForm(f=>({...f,description:e.target.value}))} rows={2} className="mt-1 text-sm" /></div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div><Label className="text-xs">แผนก *</Label>
+                    <Select value={darForm.departmentId} onValueChange={v=>setDarForm(f=>({...f,departmentId:v}))}>
+                      <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue placeholder="เลือกแผนก" /></SelectTrigger>
+                      <SelectContent>{depts.map(d=><SelectItem key={d.id} value={d.id}>{d.code} — {d.name}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
+                  <div><Label className="text-xs">ผู้รับผิดชอบ *</Label>
+                    <Select value={darForm.ownerId} onValueChange={v=>setDarForm(f=>({...f,ownerId:v}))}>
+                      <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue placeholder="เลือกผู้รับผิดชอบ" /></SelectTrigger>
+                      <SelectContent>{users.map(u=><SelectItem key={u.uid} value={u.uid}>{u.firstName} {u.lastName}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div><Label className="text-xs">Rev ใหม่ *</Label><Input value={darForm.revision} onChange={e=>setDarForm(f=>({...f,revision:e.target.value}))} className="mt-1 h-9 text-sm font-mono" /></div>
+                  <div><Label className="text-xs">วันที่เริ่มใช้ *</Label><Input type="date" value={darEffectiveDate} onChange={e=>setDarEffectiveDate(e.target.value)} className="mt-1 h-9 text-sm" /></div>
+                  <div><Label className="text-xs">ทบทวนครั้งถัดไป</Label><Input type="date" value={darForm.nextReviewDate.substring(0,10)} onChange={e=>setDarForm(f=>({...f,nextReviewDate:e.target.value}))} className="mt-1 h-9 text-sm" /></div>
+                </div>
+                <div><Label className="text-xs">รายละเอียด/เหตุผลการแก้ไข *</Label><Textarea value={darChangeSummary} onChange={e=>setDarChangeSummary(e.target.value)} rows={3} placeholder="ระบุรายการที่แก้ไขและเหตุผล เพื่อให้ QMR ใช้ประกอบการพิจารณา" className="mt-1 text-sm" /></div>
+                <div>
+                  <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">ไฟล์เอกสาร</Label>
+                  {darForm.attachments.length > 0 && <div className="space-y-1.5 mt-1.5">{darForm.attachments.map((att, idx)=><div key={`${att.url}_${idx}`} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-blue-200 bg-blue-50"><FileText className="h-4 w-4 text-blue-600 shrink-0" /><a href={att.url} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-0 text-xs text-blue-700 hover:underline truncate">{att.name}</a>{att.size > 0 && <span className="text-[10px] text-slate-400">{formatBytes(att.size)}</span>}<button type="button" onClick={()=>setDarForm(f=>({...f,attachments:f.attachments.filter((_,i)=>i!==idx)}))} className="text-red-400 hover:text-red-600"><Trash2 className="h-3.5 w-3.5" /></button></div>)}</div>}
+                  <input ref={darFileInputRef} type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.doc,.docx" onChange={handleDarFileUpload} />
+                  <Button type="button" variant="outline" size="sm" disabled={uploading} onClick={()=>darFileInputRef.current?.click()} className="w-full h-8 text-xs mt-1.5 gap-2 border-dashed"><Upload className="h-3.5 w-3.5" />{uploading ? `กำลังอัปโหลด ${uploadPct}%` : "แนบไฟล์เอกสาร"}</Button>
+                </div>
+              </>;
+            })()}
+            {darErr && <p className="text-sm text-red-600 flex items-center gap-1"><AlertCircle className="h-4 w-4 shrink-0" />{darErr}</p>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={()=>setDarOpen(false)}>ยกเลิก</Button>
+            <Button onClick={handleSubmitDar} disabled={darSaving || uploading || !darDocumentId} className="bg-indigo-600 hover:bg-indigo-700"><Send className="h-4 w-4 mr-1.5" />{darSaving ? "กำลังส่งคำขอ..." : "ส่งคำขอให้ QMR ตรวจ"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* QMR DAR review queue */}
+      <Dialog open={qmrOpen} onOpenChange={v => { setQmrOpen(v); if (!v) setQmrErr(""); }}>
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-amber-600" />{canApproveDar ? "ตรวจสอบและอนุมัติคำขอ DAR" : "ติดตามสถานะคำขอ DAR"}</DialogTitle></DialogHeader>
+          {qmrErr && <p className="text-sm text-red-600 flex items-center gap-1"><AlertCircle className="h-4 w-4" />{qmrErr}</p>}
+          <div className="space-y-3 py-2">
+            {visibleDarRequests.length === 0 ? <p className="text-sm text-slate-500 text-center py-10">ยังไม่มีคำขอ DAR</p> : visibleDarRequests.map(request => {
+              const pending = request.status === "PENDING";
+              const reqColor = pending ? "bg-amber-100 text-amber-800" : request.status === "APPROVED" ? "bg-green-100 text-green-800" : "bg-red-100 text-red-700";
+              const statusLabel = pending ? "รอ QMR ตรวจ" : request.status === "APPROVED" ? "อนุมัติแล้ว" : "ไม่อนุมัติ";
+              return <Card key={request.id} className="border border-slate-200">
+                <CardContent className="p-4 space-y-3">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div><p className="text-sm font-semibold text-slate-800">{request.docNo} · {request.title}</p><p className="text-xs text-slate-500 mt-1">{request.previousRevision} → {request.proposal.revision} · ส่งโดย {request.requestorName} · {displayDate(request.requestedAt)}</p></div>
+                    <Badge className={cn("border-0", reqColor)}>{statusLabel}</Badge>
+                  </div>
+                  <div className="grid sm:grid-cols-2 gap-3 rounded-md bg-slate-50 p-3 text-xs">
+                    <div><p className="font-semibold text-slate-500">รายละเอียดการแก้ไข</p><p className="text-slate-700 mt-1 whitespace-pre-wrap">{request.changeSummary}</p></div>
+                    <div><p className="font-semibold text-slate-500">วันที่ดำเนินการ</p><p className="text-slate-700 mt-1">วันที่เริ่มใช้ที่ขอ: {displayDate(request.effectiveDate)}</p><p className="text-slate-700">วันที่ส่งคำขอ: {displayDate(request.requestedAt)}</p>{request.reviewedAt && <p className="text-slate-700">วันที่ QMR พิจารณา: {displayDate(request.reviewedAt)} · {request.reviewerName}</p>}{request.decisionNote && <p className="text-slate-700 mt-1">หมายเหตุ: {request.decisionNote}</p>}</div>
+                  </div>
+                  <div className="text-xs text-slate-600"><span className="font-semibold">ข้อมูลที่เสนอ:</span> {request.proposal.title} · {request.proposal.department?.code ?? depts.find(d=>d.id===request.proposal.departmentId)?.code ?? ""} · {request.proposal.owner?.name ?? users.find(u=>u.uid===request.proposal.ownerId)?.firstName ?? ""}</div>
+                  {(request.proposal.attachments?.length ?? 0) > 0 && <div className="flex flex-wrap gap-2">{request.proposal.attachments?.map((att,i)=><a key={`${att.url}_${i}`} href={att.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded border border-blue-100 bg-blue-50 px-2 py-1 text-xs text-blue-700"><FileText className="h-3 w-3" />{att.name}<ExternalLink className="h-3 w-3" /></a>)}</div>}
+                  {pending && canApproveDar && <>
+                    <Textarea value={qmrNotes[request.id] ?? ""} onChange={e=>setQmrNotes(n=>({...n,[request.id]:e.target.value}))} rows={2} placeholder="หมายเหตุ QMR (กรณีไม่อนุมัติ โปรดระบุเหตุผล)" className="text-sm" />
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" className="h-8 text-xs border-red-200 text-red-700 hover:bg-red-50" onClick={()=>handleDarDecision(request,"REJECTED")} disabled={!!qmrSavingId}>{qmrSavingId===request.id ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <X className="h-3.5 w-3.5 mr-1" />}ไม่อนุมัติ</Button>
+                      <Button className="h-8 text-xs bg-green-600 hover:bg-green-700" onClick={()=>handleDarDecision(request,"APPROVED")} disabled={!!qmrSavingId}>{qmrSavingId===request.id ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Check className="h-3.5 w-3.5 mr-1" />}อนุมัติและประกาศ Rev ใหม่</Button>
+                    </div>
+                  </>}
+                </CardContent>
+              </Card>;
+            })}
+          </div>
+          <DialogFooter><Button variant="outline" onClick={()=>setQmrOpen(false)}>ปิด</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Current and superseded document revisions */}
+      <Dialog open={historyOpen} onOpenChange={v => { setHistoryOpen(v); if (!v) setHistoryDoc(null); }}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><History className="h-4 w-4 text-blue-600" />ประวัติเอกสาร — {historyDoc?.docNo}</DialogTitle></DialogHeader>
+          <div className="space-y-3 py-2">
+            {orderedVersions.map((version, index) => <Card key={`${version.revision}_${index}`} className={cn("border", index === 0 ? "border-blue-200 bg-blue-50/40" : "border-slate-200")}>
+              <CardContent className="p-4 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold text-sm text-slate-800">{version.revision} · {version.title}</p><p className="text-xs text-slate-500">{version.docNo} · {getCatMeta(version.category).label}</p></div><Badge className={index === 0 ? "bg-blue-100 text-blue-800 border-0" : "bg-slate-100 text-slate-700 border-0"}>{index === 0 ? "เวอร์ชันปัจจุบัน" : "เวอร์ชันเดิม"}</Badge></div>
+                <p className="text-xs text-slate-600 whitespace-pre-wrap">{version.description || "ไม่มีรายละเอียด"}</p>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500"><span>วันที่เริ่มใช้: {displayDate(version.issuedDate)}</span><span>ทบทวนครั้งถัดไป: {displayDate(version.nextReviewDate)}</span>{"archivedAt" in version && version.archivedAt && <span>วันที่เก็บประวัติ: {displayDate(version.archivedAt)}</span>}{"effectiveDate" in version && version.effectiveDate && <span>วันที่อนุมัติให้เริ่มใช้: {displayDate(version.effectiveDate)}</span>}</div>
+                {(version.attachments?.length ?? 0) > 0 && <div className="flex flex-wrap gap-2 pt-1">{version.attachments?.map((att,i)=><a key={`${att.url}_${i}`} href={att.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded border border-blue-100 bg-white px-2 py-1 text-xs text-blue-700"><FileText className="h-3 w-3" />{att.name}<ExternalLink className="h-3 w-3" /></a>)}</div>}
+              </CardContent>
+            </Card>)}
+          </div>
+          <DialogFooter><Button variant="outline" onClick={()=>setHistoryOpen(false)}>ปิด</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* New / Edit Document Dialog */}
       <Dialog open={showForm} onOpenChange={v => { if (!v) { setShowForm(false); setEditing(null); setFormErr(""); } }}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle className="flex items-center gap-2">
             {editing ? <><Pencil className="h-4 w-4 text-blue-600" />Edit Document</> : <><Plus className="h-4 w-4" />New Document</>}
           </DialogTitle></DialogHeader>
@@ -408,7 +668,7 @@ export default function DocumentsPage() {
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div><Label className="text-xs">Revision</Label><Input value={form.revision} onChange={e=>setForm(f=>({...f,revision:e.target.value}))} placeholder="Rev.1" className="mt-1 h-9 text-sm font-mono" /></div>
+              <div><Label className="text-xs">Revision</Label><Input value={form.revision} onChange={e=>setForm(f=>({...f,revision:e.target.value}))} placeholder="Rev.1" disabled={!!editing} className="mt-1 h-9 text-sm font-mono" />{editing && <p className="text-[10px] text-slate-400 mt-1">ส่งคำขอ DAR เพื่อออก Rev ใหม่</p>}</div>
               <div><Label className="text-xs">Status</Label>
                 <Select value={form.status} onValueChange={v=>setForm(f=>({...f,status:v}))}>
                   <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>

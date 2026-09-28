@@ -169,7 +169,7 @@ export default function ManagementReviewPage() {
 
       {/* New/Edit Dialog */}
       <Dialog open={showNew || !!editing} onOpenChange={v => { if (!v) { setShowNew(false); setEditing(null); } }}>
-        <DialogContent className="sm:max-w-[560px]">
+        <DialogContent className="sm:max-w-[760px]">
           <DialogHeader><DialogTitle>{editing ? "Edit Meeting" : "Log New Meeting"}</DialogTitle></DialogHeader>
           <div className="space-y-3 py-2 overflow-y-auto max-h-[72vh] pr-1">
 

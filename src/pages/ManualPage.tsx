@@ -112,6 +112,19 @@ const roleData = [
   },
   {
     icon: ClipboardCheck,
+    name: "QMS",
+    badge: "bg-cyan-100 text-cyan-700 border-cyan-200",
+    iconCls: "bg-cyan-50 text-cyan-600",
+    title: "ผู้ดูแลระบบคุณภาพ",
+    desc: "Quality Management System — ผู้รับผิดชอบการจัดทำและบันทึก Department Audit Checklist",
+    abilities: [
+      "แก้ไข Checklist Matrix",
+      "กรอกผลการตรวจของแต่ละแผนก",
+      "แนบหลักฐานรายข้อกำหนดและบันทึกผลลงระบบ",
+    ],
+  },
+  {
+    icon: ClipboardCheck,
     name: "AUDITOR",
     badge: "bg-orange-100 text-orange-700 border-orange-200",
     iconCls: "bg-orange-50 text-orange-600",
@@ -360,16 +373,33 @@ export default function ManualPage() {
                 </div>
               </div>
 
+            </div>
+
+            {/* KPI MANAGEMENT */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 pb-2 border-b border-slate-200">
+                <Target className="h-4 w-4 text-indigo-600" />
+                <h3 className="font-bold text-sm text-slate-800">📊 KPI MANAGEMENT</h3>
+              </div>
+
               <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
                 <p className="font-semibold text-sm text-slate-800 mb-1">KPI Management</p>
-                <p className="text-xs text-slate-600 mb-2">กำหนดตัวชี้วัดรายแผนก</p>
+                <p className="text-xs text-slate-600 mb-2">กำหนดตัวชี้วัดรายแผนกและจัดกลุ่มด้วยสีประจำแผนก</p>
+                <div className="bg-white rounded border border-slate-200 p-2 text-xs text-slate-600">
+                  สีของแผนกจะแสดงเหมือนกันในหน้า KPI Reports เพื่อช่วยให้ติดตามข้อมูลได้ง่ายขึ้น
+                </div>
+              </div>
+
+              <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
+                <p className="font-semibold text-sm text-slate-800 mb-1">KPI Reports</p>
+                <p className="text-xs text-slate-600 mb-2">ส่งรายงานผลงาน KPI รายเดือน</p>
                 <div className="bg-white rounded border border-slate-200 p-2 text-xs">
-                  <p className="font-semibold text-slate-700 mb-1">Workflow การตั้งค่า KPI:</p>
+                  <p className="font-semibold text-slate-700 mb-1">Workflow:</p>
                   <ol className="text-slate-600 space-y-1 ml-4 list-decimal">
-                    <li>เลือก Year Cycle (ปีที่ต้องการ)</li>
-                    <li>กด "สร้าง KPI ใหม่"</li>
-                    <li>เลือกแผนก → กรอกชื่อ KPI → ตั้งเป้าหมาย (Target) + หน่วย</li>
-                    <li>บันทึก → KPI พร้อมรับรายงานรายเดือน</li>
+                    <li>เลือก Year Cycle</li>
+                    <li>เลือก KPI ที่ต้องการรายงาน</li>
+                    <li>กรอกค่าผลงาน (Actual Value) ของเดือนนั้น</li>
+                    <li>บันทึก → ระบบคำนวณสถานะการส่งรายงาน</li>
                   </ol>
                 </div>
               </div>
@@ -380,34 +410,6 @@ export default function ManualPage() {
               <div className="flex items-center gap-2 pb-2 border-b border-slate-200">
                 <FileText className="h-4 w-4 text-green-600" />
                 <h3 className="font-bold text-sm text-slate-800">📝 DO</h3>
-              </div>
-
-              <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
-                <p className="font-semibold text-sm text-slate-800 mb-1">KPI Reports</p>
-                <p className="text-xs text-slate-600 mb-2">ส่งรายงานผลงาน KPI รายเดือน</p>
-                <div className="bg-white rounded border border-slate-200 p-2 text-xs mb-2">
-                  <p className="font-semibold text-slate-700 mb-1">Workflow:</p>
-                  <ol className="text-slate-600 space-y-1 ml-4 list-decimal">
-                    <li>เลือก Year Cycle</li>
-                    <li>เลือก KPI ที่ต้องการรายงาน</li>
-                    <li>กรอกค่าผลงาน (Actual Value) ของเดือนนั้น</li>
-                    <li>บันทึก → ระบบคำนวณ % เทียบ Target อัตโนมัติ</li>
-                  </ol>
-                </div>
-                <div className="grid grid-cols-3 gap-2 text-xs">
-                  <div className="bg-green-50 border border-green-200 rounded p-1.5 text-center">
-                    <span className="font-bold text-green-700">🟢 เขียว</span>
-                    <p className="text-green-600 text-[10px] mt-0.5">ส่งตรงเวลา</p>
-                  </div>
-                  <div className="bg-red-50 border border-red-200 rounded p-1.5 text-center">
-                    <span className="font-bold text-red-700">🔴 แดง</span>
-                    <p className="text-red-600 text-[10px] mt-0.5">ส่งล่าช้า</p>
-                  </div>
-                  <div className="bg-slate-50 border border-slate-200 rounded p-1.5 text-center">
-                    <span className="font-bold text-slate-600">⬜ เทา</span>
-                    <p className="text-slate-500 text-[10px] mt-0.5">ยังไม่ส่ง</p>
-                  </div>
-                </div>
               </div>
 
               <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">

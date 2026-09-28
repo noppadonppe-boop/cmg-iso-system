@@ -81,6 +81,30 @@
   body { background-color: var(--background); color: var(--foreground); }
 }
 
+[data-slot="dialog-content"] :is([data-slot="input"], [data-slot="textarea"], [data-slot="select-trigger"]) {
+  border-color: #cbd5e1;
+  border-radius: 0.625rem;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+[data-slot="dialog-content"] :is([data-slot="input"], [data-slot="textarea"], [data-slot="select-trigger"]):focus-visible {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgb(59 130 246 / 14%);
+}
+
+[data-slot="dialog-content"] [data-slot="button"]:is(.bg-primary, .bg-blue-600, .bg-blue-700, .bg-indigo-600, .bg-slate-900) {
+  background-color: #4f46e5;
+  background-image: linear-gradient(120deg, #38bdf8, #6366f1);
+  color: #fff;
+  box-shadow: 0 5px 12px rgb(99 102 241 / 18%);
+}
+
+[data-slot="dialog-content"] [data-slot="button"]:is(.bg-primary, .bg-blue-600, .bg-blue-700, .bg-indigo-600, .bg-slate-900):hover {
+  background-color: #4338ca;
+  background-image: linear-gradient(120deg, #0ea5e9, #4f46e5);
+  box-shadow: 0 7px 16px rgb(99 102 241 / 26%);
+}
+
 @media print {
   @page { size: A4 portrait; margin: 18mm 15mm; }
   nav, aside, header, .no-print { display: none !important; }

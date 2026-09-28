@@ -277,7 +277,7 @@ export default function MocPage() {
       {/* ── Reusable attachments section ── */}
       {/* New MOC Dialog */}
       <Dialog open={showNew} onOpenChange={v => { setShowNew(v); if (!v) setPendingAttachments([]); }}>
-        <DialogContent className="sm:max-w-[560px]">
+        <DialogContent className="sm:max-w-[760px]">
           <DialogHeader><DialogTitle>New MOC Request</DialogTitle></DialogHeader>
           <div className="space-y-3 py-2 overflow-y-auto max-h-[72vh] pr-1">
             <div><Label className="text-xs">Title <span className="text-red-500">*</span></Label>
@@ -332,7 +332,7 @@ export default function MocPage() {
 
       {/* Edit Dialog */}
       <Dialog open={!!editing} onOpenChange={v => { if (!v) { setEditing(null); setPendingAttachments([]); } }}>
-        <DialogContent className="sm:max-w-[560px]">
+        <DialogContent className="sm:max-w-[760px]">
           <DialogHeader><DialogTitle>Edit MOC — {editing?.mocNo}</DialogTitle></DialogHeader>
           <div className="space-y-3 py-2 overflow-y-auto max-h-[72vh] pr-1">
             <div><Label className="text-xs">Title</Label>

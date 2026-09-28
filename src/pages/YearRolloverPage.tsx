@@ -275,7 +275,7 @@ export default function YearRolloverPage() {
 
       {/* ── Submit Report Dialog ── */}
       <Dialog open={confirm?.action === "submit"} onOpenChange={v => { if (!v) { setConfirm(null); setReportUrl(""); setUploadedFileName(""); } }}>
-        <DialogContent className="sm:max-w-[460px]">
+        <DialogContent className="sm:max-w-[600px]">
           <DialogHeader>
             <DialogTitle>Submit Annual Report — Year {confirm?.yc.year}</DialogTitle>
           </DialogHeader>

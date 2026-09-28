@@ -14,6 +14,9 @@ import { ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject }
 import type { KPI, KPIReport, Department, AuditAttachment } from "@/lib/types";
 import { Printer, Loader2, CheckCircle, AlertCircle, RefreshCw, Pencil, Upload, FileText, ExternalLink, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { CompactStats } from "@/components/ui/compact-stats";
+import { getDepartmentColor } from "@/lib/department-colors";
+import { KpiTabs } from "@/components/kpi/KpiTabs";
 
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
@@ -107,16 +110,19 @@ export default function KpiReportsPage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const filteredKpis = filterDept === "ALL" ? kpis : kpis.filter(k => k.departmentId === filterDept);
+  const departmentOrder = new Map(depts.map((dept, index) => [dept.id, index]));
+  const filteredKpis = [...(filterDept === "ALL" ? kpis : kpis.filter(k => k.departmentId === filterDept))]
+    .sort((a, b) => {
+      const aOrder = departmentOrder.get(a.departmentId) ?? depts.length;
+      const bOrder = departmentOrder.get(b.departmentId) ?? depts.length;
+      return aOrder - bOrder;
+    });
 
   function getReport(kpiId: string, month: number) {
     return reports.find(r => r.kpiId === kpiId && r.reportMonth === month);
   }
 
-  const onTime = reports.filter(r => r.status === "ON_TIME").length;
-  const late   = reports.filter(r => r.status === "LATE").length;
-  const total  = reports.length;
-  const submitRate = kpis.length > 0 ? Math.round((reports.length / (kpis.length * 12)) * 100) : 0;
+  const assigned = kpis.filter(kpi => Boolean(kpi.departmentId)).length;
 
   async function handleSubmit() {
     if (!form.kpiId || !form.reportMonth || !form.value) { setErr("กรุณากรอกข้อมูลให้ครบ"); return; }
@@ -168,7 +174,8 @@ export default function KpiReportsPage() {
 
   return (
     <AppLayout title="KPI Reports">
-      <div className="no-print flex flex-wrap gap-3 items-center mb-5">
+      <KpiTabs />
+      <div className="no-print flex flex-wrap gap-3 items-center mb-3">
         <Select value={filterDept} onValueChange={setFilterDept}>
           <SelectTrigger className="w-44 h-9 text-sm"><SelectValue placeholder="Filter dept" /></SelectTrigger>
           <SelectContent>
@@ -184,28 +191,30 @@ export default function KpiReportsPage() {
         </div>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-4 mb-5 no-print">
-        {([
-          ["On Time",      onTime,           "text-green-700",  "bg-green-50"],
-          ["Late",         late,             "text-red-700",    "bg-red-50"],
-          ["Total Submit", total,            "text-slate-700",  "bg-slate-50"],
-          ["Submit Rate",  `${submitRate}%`, "text-blue-700",   "bg-blue-50"],
-        ] as [string, string|number, string, string][]).map(([l,v,tc,bg]) => (
-          <Card key={l} className={cn("border border-slate-200", bg)}>
-            <CardContent className="p-2 md:p-4 text-center md:text-left overflow-hidden">
-              <p className="text-[10px] md:text-xs text-slate-500 mb-0.5 md:mb-1 truncate">{l}</p>
-              <p className={cn("text-base md:text-2xl font-bold truncate", tc)}>{v}</p>
-            </CardContent>
-          </Card>
-        ))}
+      <div className="no-print mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
+        <span className="mr-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Departments</span>
+        {depts.map(dept => {
+          const color = getDepartmentColor(dept.id, dept.code);
+          return (
+            <span key={dept.id} className={cn("inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] font-medium", color.badge)}>
+              <span className={cn("h-1.5 w-1.5 rounded-full", color.accent)} />
+              {dept.code}
+            </span>
+          );
+        })}
       </div>
+
+      <CompactStats className="mb-3 no-print w-full sm:max-w-[520px] rounded-lg shadow-none" items={[
+        { label: "Clauses", value: kpis.length },
+        { label: "Departments", value: depts.length },
+        { label: "Assigned", value: assigned, tone: "blue" },
+      ]} />
 
       {loading ? (
         <div className="flex items-center justify-center py-20 text-slate-400"><Loader2 className="h-6 w-6 animate-spin mr-2"/>Loading...</div>
       ) : (
-        <Card className="border border-slate-200 print-area">
-          <CardHeader className="pb-2 border-b border-slate-100">
+        <Card className="gap-0 border border-slate-200 py-0 print-area">
+          <CardHeader className="gap-0 border-b border-slate-100 px-4 py-2.5">
             <CardTitle className="text-sm font-semibold text-slate-700">KPI Monthly Submission Heatmap — {selectedYear?.year}</CardTitle>
           </CardHeader>
           <CardContent className="p-0 overflow-x-auto">
@@ -223,8 +232,8 @@ export default function KpiReportsPage() {
                   const dept = depts.find(d => d.id === kpi.departmentId);
                   return (
                     <tr key={kpi.id} className="border-b border-slate-100 hover:bg-slate-50/50">
-                      <td className="px-4 py-2.5">
-                        <Badge variant="secondary" className="text-[10px]">{dept?.code}</Badge>
+                      <td className={cn("px-4 py-2.5", dept && getDepartmentColor(dept.id, dept.code).cell)}>
+                        {dept && <Badge variant="secondary" className={cn("border text-[10px]", getDepartmentColor(dept.id, dept.code).badge)}>{dept.code}</Badge>}
                       </td>
                       <td className="px-4 py-2.5 font-medium text-slate-800">{kpi.name}</td>
                       <td className="px-2 py-2.5 text-center font-mono text-slate-600">{kpi.target} {kpi.unit}</td>
@@ -269,7 +278,7 @@ export default function KpiReportsPage() {
 
       {/* Submit Dialog */}
       <Dialog open={showNew} onOpenChange={v=>{ if (!v) { setShowNew(false); setErr(""); setForm({ kpiId:"", reportMonth:"", value:"", attachments: [] }); tempIdRef.current = `new_${Date.now()}`; } }}>
-        <DialogContent className="min-w-0 sm:max-w-[640px]">
+        <DialogContent className="min-w-0 sm:max-w-[760px]">
           <DialogHeader><DialogTitle>Submit KPI Report</DialogTitle></DialogHeader>
           <div className="min-w-0 space-y-3 py-2">
             <div className="min-w-0"><Label className="text-xs">KPI *</Label>
@@ -352,7 +361,7 @@ export default function KpiReportsPage() {
 
       {/* Edit Report Dialog */}
       <Dialog open={!!editReport} onOpenChange={v=>{ if (!v) { setEditReport(null); setEditAttachments([]); setErr(""); } }}>
-        <DialogContent className="min-w-0 sm:max-w-[640px]">
+        <DialogContent className="min-w-0 sm:max-w-[760px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><Pencil className="h-5 w-5 text-blue-600"/>Edit Report</DialogTitle>
           </DialogHeader>

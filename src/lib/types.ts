@@ -1,6 +1,7 @@
 // ── Auth / User Management ────────────────────────────────────────────────────
 export const ROLES = [
   "MasterAdmin",
+  "QMS",
   "QMR",
   "AUDITOR",
   "AUDITEE",
@@ -56,6 +57,50 @@ export type Department = {
   id: string;
   code: string;
   name: string;
+};
+
+export type InternalAuditChecklistItem = {
+  id: string;
+  yearCycleId: string;
+  isoStandard: "ISO9001" | "ISO45001" | "BOTH";
+  clauseNo: string;
+  clauseDescriptionEn: string;
+  clauseDescriptionTh: string;
+  cmgPmReference: string;
+  departmentIds: string[];
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type DepartmentAuditResult = "/" | "C" | "CAR" | "OBS";
+
+export type DepartmentAuditChecklistEntry = {
+  finding: string;
+  result: DepartmentAuditResult;
+  remark: string;
+  attachments?: AuditAttachment[];
+};
+
+export type DepartmentAuditChecklist = {
+  id: string;
+  yearCycleId: string;
+  departmentId: string;
+  metadata: {
+    auditor: string;
+    auditDate: string;
+    auditee: string;
+    status: string;
+  };
+  entries: Record<string, DepartmentAuditChecklistEntry>;
+  updatedAt?: string;
+  updatedBy?: string;
+};
+
+export type InternalAuditChecklistLayout = {
+  matrixColumnWidths?: Record<string, number>;
+  departmentColumnWidths?: Record<string, number>;
+  updatedAt?: string;
+  updatedBy?: string;
 };
 
 export type User = {
@@ -205,4 +250,53 @@ export type Document = {
   relatedCparId: string | null;
   relatedMocId: string | null;
   attachments?: AuditAttachment[];
+  versions?: DocumentVersion[];
+  pendingRevisionRequestId?: string | null;
+};
+
+export type DocumentRevisionProposal = {
+  docNo: string;
+  title: string;
+  category: string;
+  departmentId: string;
+  department?: Department;
+  ownerId: string;
+  owner?: User;
+  revision: string;
+  issuedDate: string;
+  nextReviewDate: string;
+  fileUrl: string | null;
+  description: string;
+  relatedCparId: string | null;
+  relatedMocId: string | null;
+  attachments?: AuditAttachment[];
+};
+
+export type DocumentVersion = DocumentRevisionProposal & {
+  status: string;
+  archivedAt: string;
+  darRequestId?: string;
+  approvedAt?: string;
+  effectiveDate?: string;
+};
+
+export type DocumentRevisionRequest = {
+  id: string;
+  documentId: string;
+  docNo: string;
+  title: string;
+  category: string;
+  previousRevision: string;
+  previousDocumentStatus: string;
+  proposal: DocumentRevisionProposal;
+  changeSummary: string;
+  effectiveDate: string;
+  status: "PENDING" | "APPROVED" | "REJECTED";
+  requestedAt: string;
+  requestorId: string;
+  requestorName: string;
+  reviewedAt?: string;
+  reviewerId?: string;
+  reviewerName?: string;
+  decisionNote?: string;
 };

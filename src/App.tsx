@@ -9,6 +9,7 @@ import MasterPlanPage       from '@/pages/MasterPlanPage'
 import KpiPage              from '@/pages/KpiPage'
 import KpiReportsPage       from '@/pages/KpiReportsPage'
 import AuditsPage           from '@/pages/AuditsPage'
+import InternalAuditChecklistPage from '@/pages/InternalAuditChecklistPage'
 import CparPage             from '@/pages/CparPage'
 import ManagementReviewPage from '@/pages/ManagementReviewPage'
 import MocPage              from '@/pages/MocPage'
@@ -33,6 +34,7 @@ export default function App() {
       <Route path="/kpi"               element={<ProtectedRoute><KpiPage /></ProtectedRoute>} />
       <Route path="/kpi/reports"       element={<ProtectedRoute><KpiReportsPage /></ProtectedRoute>} />
       <Route path="/audits"            element={<ProtectedRoute><AuditsPage /></ProtectedRoute>} />
+      <Route path="/internal-audit-checklist" element={<ProtectedRoute><InternalAuditChecklistPage /></ProtectedRoute>} />
       <Route path="/cpar"              element={<ProtectedRoute><CparPage /></ProtectedRoute>} />
       <Route path="/management-review" element={<ProtectedRoute><ManagementReviewPage /></ProtectedRoute>} />
       <Route path="/moc"               element={<ProtectedRoute><MocPage /></ProtectedRoute>} />

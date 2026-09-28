@@ -454,7 +454,7 @@ export default function AuditorsPage() {
 
       {/* ── Add Auditor Dialog ── */}
       <Dialog open={showAdd} onOpenChange={v => { setShowAdd(v); if (!v) resetAddForm(); }}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-[640px]">
           <DialogHeader><DialogTitle className="flex items-center gap-2"><Plus className="h-5 w-5 text-blue-600" />Add Auditor</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
             <div>
@@ -509,7 +509,7 @@ export default function AuditorsPage() {
 
       {/* ── Edit / Cert Upload Dialog ── */}
       <Dialog open={!!editing} onOpenChange={v => !v && setEditing(null)}>
-        <DialogContent className="w-[calc(100%-1rem)] max-w-[560px] max-h-[calc(100vh-1rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden p-4 sm:p-6">
+        <DialogContent className="w-[calc(100%-1rem)] max-w-[760px] max-h-[calc(100vh-1rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden p-4 sm:p-6">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><Pencil className="h-5 w-5 text-blue-600" />Edit Auditor — {editing?.user?.name}</DialogTitle>
           </DialogHeader>

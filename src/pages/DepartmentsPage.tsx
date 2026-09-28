@@ -142,7 +142,7 @@ export default function DepartmentsPage() {
 
       {/* ── Add / Edit Dialog ── */}
       <Dialog open={showForm} onOpenChange={v => setShowForm(v)}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="max-w-xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               {editing

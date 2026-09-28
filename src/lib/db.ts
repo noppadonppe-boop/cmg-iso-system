@@ -6,13 +6,15 @@
  * so all data is visible to everyone without per-user isolation.
  */
 import {
-  doc, getDocs, getDoc, addDoc, updateDoc, deleteDoc, setDoc,
+  doc, getDocs, getDoc, addDoc, updateDoc, deleteDoc, setDoc, runTransaction,
   query, where, orderBy, Timestamp,
 } from "firebase/firestore";
 import { rootCol, db } from "./firebase";
 import type {
   YearCycle, Department, User, AuditorProfile,
   AuditPlan, CPAR, ManagementReview, KPI, KPIReport, MOC, Document,
+  DocumentRevisionRequest, DocumentRevisionProposal, DocumentVersion,
+  InternalAuditChecklistItem, DepartmentAuditChecklist, InternalAuditChecklistLayout,
 } from "./types";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -61,6 +63,74 @@ export async function updateDepartment(id: string, data: Partial<Department>) {
 
 export async function deleteDepartment(id: string) {
   await deleteDoc(doc(db, "cmg-iso-system", "root", "departments", id));
+}
+
+// ── Internal Audit Checklist ────────────────────────────────────────────────
+export async function getInternalAuditChecklistItems(yearId?: string): Promise<InternalAuditChecklistItem[]> {
+  const qs = await getDocs(rootCol("internalAuditChecklists"));
+  return toSnaps<InternalAuditChecklistItem>(qs)
+    .filter(item => !yearId || item.yearCycleId === yearId)
+    .sort((a, b) => a.clauseNo.localeCompare(b.clauseNo, undefined, { numeric: true, sensitivity: "base" }));
+}
+
+export async function createInternalAuditChecklistItem(
+  data: Omit<InternalAuditChecklistItem, "id">,
+) {
+  const ref = await addDoc(rootCol("internalAuditChecklists"), data);
+  return ref.id;
+}
+
+export async function updateInternalAuditChecklistItem(
+  id: string,
+  data: Partial<InternalAuditChecklistItem>,
+) {
+  await updateDoc(doc(db, "cmg-iso-system", "root", "internalAuditChecklists", id), data);
+}
+
+export async function deleteInternalAuditChecklistItem(id: string) {
+  await deleteDoc(doc(db, "cmg-iso-system", "root", "internalAuditChecklists", id));
+}
+
+// ── Department Audit Checklist ─────────────────────────────────────────────
+function departmentAuditChecklistDocId(yearCycleId: string, departmentId: string) {
+  return `${yearCycleId}_${departmentId}`;
+}
+
+export async function getDepartmentAuditChecklist(
+  yearCycleId: string,
+  departmentId: string,
+): Promise<DepartmentAuditChecklist | null> {
+  const id = departmentAuditChecklistDocId(yearCycleId, departmentId);
+  const snapshot = await getDoc(doc(db, "cmg-iso-system", "root", "departmentAuditChecklists", id));
+  return snapshot.exists() ? toSnap<DepartmentAuditChecklist>(snapshot) : null;
+}
+
+export async function saveDepartmentAuditChecklist(
+  data: Omit<DepartmentAuditChecklist, "id">,
+) {
+  const id = departmentAuditChecklistDocId(data.yearCycleId, data.departmentId);
+  await setDoc(
+    doc(db, "cmg-iso-system", "root", "departmentAuditChecklists", id),
+    data,
+    { merge: true },
+  );
+  return id;
+}
+
+export async function getInternalAuditChecklistLayout(): Promise<InternalAuditChecklistLayout> {
+  const snapshot = await getDoc(doc(db, "cmg-iso-system", "root", "appMeta", "internalAuditChecklistLayout"));
+  return snapshot.exists() ? snapshot.data() as InternalAuditChecklistLayout : {};
+}
+
+export async function saveInternalAuditChecklistLayout(
+  layout: InternalAuditChecklistLayout,
+  updatedBy: string,
+) {
+  await setDoc(
+    doc(db, "cmg-iso-system", "root", "appMeta", "internalAuditChecklistLayout"),
+    { ...layout, updatedAt: new Date().toISOString(), updatedBy },
+    { merge: true },
+  );
 }
 
 // ── Users ─────────────────────────────────────────────────────────────────────
@@ -282,6 +352,93 @@ export async function updateDocument(id: string, data: Partial<Document>) {
 
 export async function deleteDocument(id: string) {
   await deleteDoc(doc(db, "cmg-iso-system", "root", "documents", id));
+}
+
+// ── Document revision requests (DAR) ─────────────────────────────────────────
+export async function getDocumentRevisionRequests(): Promise<DocumentRevisionRequest[]> {
+  const qs = await getDocs(query(rootCol("documentRevisionRequests"), orderBy("requestedAt", "desc")));
+  return toSnaps<DocumentRevisionRequest>(qs).map(r => ({
+    ...r,
+    requestedAt: fromTs(r.requestedAt),
+    reviewedAt: fromTs(r.reviewedAt),
+  }));
+}
+
+export async function createDocumentRevisionRequest(data: Omit<DocumentRevisionRequest, "id" | "status" | "requestedAt">) {
+  const requestRef = doc(rootCol("documentRevisionRequests"));
+  const documentRef = doc(db, "cmg-iso-system", "root", "documents", data.documentId);
+  const requestedAt = new Date().toISOString();
+  await runTransaction(db, async transaction => {
+    const documentSnap = await transaction.get(documentRef);
+    if (!documentSnap.exists()) throw new Error("ไม่พบเอกสารที่เลือก");
+    if (documentSnap.data().pendingRevisionRequestId) throw new Error("เอกสารนี้มีคำขอแก้ไขที่รออนุมัติอยู่แล้ว");
+    if (documentSnap.data().revision !== data.previousRevision || documentSnap.data().docNo !== data.docNo) {
+      throw new Error("ข้อมูลเอกสารเปลี่ยนแปลง กรุณาโหลดรายการใหม่แล้วสร้างคำขออีกครั้ง");
+    }
+    transaction.set(requestRef, { ...data, status: "PENDING", requestedAt });
+    transaction.update(documentRef, { status: "UNDER_REVIEW", pendingRevisionRequestId: requestRef.id });
+  });
+  return requestRef.id;
+}
+
+export async function decideDocumentRevisionRequest(
+  requestId: string,
+  decision: "APPROVED" | "REJECTED",
+  reviewer: { id: string; name: string },
+  decisionNote = "",
+) {
+  const requestRef = doc(db, "cmg-iso-system", "root", "documentRevisionRequests", requestId);
+  const reviewedAt = new Date().toISOString();
+  await runTransaction(db, async transaction => {
+    const requestSnap = await transaction.get(requestRef);
+    if (!requestSnap.exists()) throw new Error("ไม่พบคำขอ DAR");
+    const request = requestSnap.data() as Omit<DocumentRevisionRequest, "id">;
+    if (request.status !== "PENDING") throw new Error("คำขอนี้ได้รับการพิจารณาแล้ว");
+
+    const documentRef = doc(db, "cmg-iso-system", "root", "documents", request.documentId);
+    const documentSnap = await transaction.get(documentRef);
+    if (!documentSnap.exists()) throw new Error("ไม่พบเอกสารต้นฉบับ");
+    const current = documentSnap.data() as Omit<Document, "id">;
+    if (current.pendingRevisionRequestId !== requestId) throw new Error("สถานะเอกสารไม่ตรงกับคำขอ DAR นี้");
+    if (current.revision !== request.previousRevision) throw new Error("Rev ปัจจุบันไม่ตรงกับคำขอ DAR นี้");
+
+    transaction.update(requestRef, {
+      status: decision,
+      reviewedAt,
+      reviewerId: reviewer.id,
+      reviewerName: reviewer.name,
+      decisionNote,
+    });
+
+    if (decision === "APPROVED") {
+      const { versions = [], pendingRevisionRequestId: _pending, ...oldContent } = current;
+      const oldVersion: DocumentVersion = {
+        ...oldContent,
+        issuedDate: fromTs(current.issuedDate),
+        nextReviewDate: fromTs(current.nextReviewDate),
+        status: request.previousDocumentStatus,
+        archivedAt: reviewedAt,
+        darRequestId: requestId,
+        approvedAt: reviewedAt,
+        effectiveDate: request.effectiveDate,
+      };
+      const proposal: DocumentRevisionProposal = {
+        ...request.proposal,
+        issuedDate: new Date(`${request.effectiveDate}T00:00:00`).toISOString(),
+      };
+      transaction.update(documentRef, {
+        ...proposal,
+        status: "ACTIVE",
+        versions: [...versions, oldVersion],
+        pendingRevisionRequestId: null,
+      });
+    } else {
+      transaction.update(documentRef, {
+        status: request.previousDocumentStatus,
+        pendingRevisionRequestId: null,
+      });
+    }
+  });
 }
 
 // ── Seed helper (used by seed script) ────────────────────────────────────────

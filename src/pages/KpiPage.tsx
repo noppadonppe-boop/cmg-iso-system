@@ -15,6 +15,8 @@ import { ref as storageRef, uploadBytesResumable, getDownloadURL } from "firebas
 import type { KPI, Department, AuditAttachment } from "@/lib/types";
 import { Plus, Pencil, Trash2, Target, Loader2, AlertCircle, RefreshCw, Upload, FileText, ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { getDepartmentColor } from "@/lib/department-colors";
+import { KpiTabs } from "@/components/kpi/KpiTabs";
 
 export default function KpiPage() {
   const { selectedYear } = useYearCycle();
@@ -102,6 +104,7 @@ export default function KpiPage() {
 
   return (
     <AppLayout title="KPI Management">
+      <KpiTabs />
       <div className="flex items-center justify-between mb-5">
         <div className="flex items-center gap-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-100"><Target className="h-5 w-5 text-blue-600" /></div>
@@ -118,32 +121,33 @@ export default function KpiPage() {
       {loading ? (
         <div className="flex items-center justify-center py-20 text-slate-400"><Loader2 className="h-6 w-6 animate-spin mr-2" />Loading...</div>
       ) : (
-        <div className="space-y-5">
+        <div className="space-y-3">
           {byDept.map(({ dept, kpis: dkpis }) => (
-            <Card key={dept.id} className="border border-slate-200">
-              <CardHeader className="pb-2 border-b border-slate-100">
+            <Card key={dept.id} className={cn("gap-0 overflow-hidden border border-l-4 py-0 shadow-sm", getDepartmentColor(dept.id, dept.code).card)}>
+              <CardHeader className={cn("gap-0 border-b px-4 py-2", getDepartmentColor(dept.id, dept.code).header)}>
                 <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                  <Badge variant="secondary" className="text-xs">{dept.code}</Badge>
-                  {dept.name}
+                  <span className={cn("h-2.5 w-2.5 shrink-0 rounded-full", getDepartmentColor(dept.id, dept.code).accent)} />
+                  <Badge variant="secondary" className={cn("border text-xs", getDepartmentColor(dept.id, dept.code).badge)}>{dept.code}</Badge>
+                  <span className="text-slate-800">{dept.name}</span>
                   <span className="text-xs text-slate-400 font-normal ml-auto">{dkpis.length} KPIs</span>
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-0">
                 <table className="w-full text-sm">
-                  <thead><tr className="bg-slate-50 border-b border-slate-100 text-xs text-slate-500">
-                    <th className="text-left px-4 py-2">KPI Name</th>
-                    <th className="text-center px-4 py-2">Target</th>
-                    <th className="text-center px-4 py-2">Unit</th>
-                    <th className="text-center px-4 py-2 w-24">Actions</th>
+                  <thead><tr className={cn("border-b text-[11px] text-slate-500", getDepartmentColor(dept.id, dept.code).cell)}>
+                    <th className="text-left px-3 py-1.5">KPI Name</th>
+                    <th className="text-center px-3 py-1.5">Target</th>
+                    <th className="text-center px-3 py-1.5">Unit</th>
+                    <th className="text-center px-3 py-1.5 w-20">Actions</th>
                   </tr></thead>
                   <tbody className="divide-y divide-slate-50">
                     {dkpis.map(k => (
-                      <tr key={k.id} className="hover:bg-slate-50/50">
-                        <td className="px-4 py-3">
-                          <p className="font-medium text-slate-800">{k.name}</p>
-                          {k.description && <p className="text-xs text-slate-400 mt-0.5">{k.description}</p>}
+                      <tr key={k.id} className="hover:bg-slate-50/50 align-middle">
+                        <td className="min-w-0 px-3 py-2">
+                          <p className="truncate font-medium leading-5 text-slate-800" title={k.name}>{k.name}</p>
+                          {k.description && <p className="truncate text-[11px] leading-4 text-slate-400" title={k.description}>{k.description}</p>}
                           {k.attachments && k.attachments.length > 0 && (
-                            <div className="flex flex-wrap gap-1 mt-1">
+                            <div className="mt-0.5 flex flex-wrap gap-1">
                               {k.attachments.map((att, i) => (
                                 <a key={i} href={att.url} target="_blank" rel="noopener noreferrer"
                                   className="inline-flex items-center gap-1 text-[10px] text-blue-600 bg-blue-50 border border-blue-100 rounded px-1.5 py-0.5 hover:underline hover:bg-blue-100 transition-colors">
@@ -153,9 +157,9 @@ export default function KpiPage() {
                             </div>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-center font-mono font-semibold text-blue-700">{k.target}</td>
-                        <td className="px-4 py-3 text-center text-slate-500">{k.unit}</td>
-                        <td className="px-4 py-3 text-center">
+                        <td className="px-3 py-2 text-center font-mono text-sm font-semibold text-blue-700">{k.target}</td>
+                        <td className="px-3 py-2 text-center text-sm text-slate-500">{k.unit}</td>
+                        <td className="px-3 py-2 text-center">
                           <div className="flex items-center justify-center gap-1">
                             <Button variant="ghost" size="icon-sm" onClick={() => openEdit(k)}><Pencil className="h-3.5 w-3.5" /></Button>
                             <Button variant="ghost" size="icon-sm" className="text-red-500 hover:text-red-700 hover:bg-red-50" onClick={() => setDeleting(k)}><Trash2 className="h-3.5 w-3.5" /></Button>
@@ -179,7 +183,7 @@ export default function KpiPage() {
 
       {/* New/Edit Dialog */}
       <Dialog open={showNew || !!editing} onOpenChange={v => { if (!v) { setShowNew(false); setEditing(null); } }}>
-        <DialogContent className="sm:max-w-[540px]">
+        <DialogContent className="sm:max-w-[720px]">
           <DialogHeader><DialogTitle>{editing ? "Edit KPI" : "New KPI"}</DialogTitle></DialogHeader>
           <div className="space-y-3 py-2 overflow-y-auto max-h-[70vh] pr-1">
             <div>
